@@ -1,3 +1,4 @@
+// Git
 export interface GitLabCommit {
 	id: string
 	short_id: string
@@ -8,6 +9,7 @@ export interface GitLabCommit {
 	message: string
 }
 
+// Prop
 export interface Prop {
 	_id: string
 	value: string
@@ -20,7 +22,7 @@ export interface PropRsp {
 	data: Prop | null
 }
 
-// in excel
+// In Excel (Game Resource)
 export interface SceneData {
 	id: number
 	scriptData: string
@@ -29,8 +31,11 @@ export interface SceneData {
 export interface AvatarData {
 	id: number
 	nameTextMapHash: number
+	descTextMapHash: number
 	iconName: string
-	//qualityType: string;
+	weaponType: string
+	qualityType: string
+	bodyType: string
 }
 export interface WeaponData {
 	id: number
@@ -63,11 +68,30 @@ export interface NormalItemData {
 	//rankLevel: string;
 }
 
-// in datebase
+// In Datebase
+export interface BookRsp {
+	message: string
+	retcode: number
+	data: any[] | null
+}
 export interface ItemData {
 	id: number // id item
 	type: number // 1=avatar,
 	game: number // 1=genshin, 2=starrail
 	name: Record<string, string> // name item
+	desc: Record<string, string> // desc item
 	icon: string // icon item
+}
+//default data based on language fallback (json only)
+export interface ItemDefault extends ItemData {
+	nameDefault?: string
+	descDefault?: string
+}
+export interface ItemAvatarGI extends ItemData {
+	// away from type 1 for avatar
+	type: 1
+	// detail
+	weaponType?: string
+	qualityType?: string
+	bodyType?: string
 }

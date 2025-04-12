@@ -7,12 +7,10 @@ import {
 	getTimeV2,
 	isEmpty,
 	isValidUrl,
-	readJsonFileCached,
-	sleep
+	readJsonFileCached
 } from "@UT/library"
-import { GitLabCommit, ItemData, Prop, PropRsp } from "@UT/response"
+import { BookRsp, GitLabCommit, ItemData, Prop, PropRsp } from "@UT/response"
 // thrid party
-import { Collection } from "mongodb"
 import axios from "axios"
 import fs from "fs/promises"
 // datebase
@@ -21,22 +19,145 @@ import DBMongo from "@DB/client/mongo"
 const log = new Logger("General")
 
 export const _ = {
-	itemExists: async function (id: number, type: number): Promise<boolean> {
+	getItem: async function (options?: {
+		search?: string
+		type?: number
+		game?: number
+		lang?: string
+		limit?: number
+		page?: number
+	}): Promise<BookRsp> {
+		try {
+			const cItem = DBMongo.getCollection<ItemData>("book")
+			if (!cItem) {
+				log.errorNoStack("api_db_nofound_collection")
+				return {
+					message: "api_db_nofound_collection",
+					retcode: statusCodes.error.CANCEL,
+					data: null
+				}
+			}
 
-		await DBMongo.isConnected();
+			const { search, type, game, lang = "EN", limit = 10, page = 1 } = options || {}
 
-		const collection = DBMongo.getCollection<ItemData>("book");
-		if (!collection) {
-			log.errorNoStack("api_db_nofound_collection_book");
-			return false;  // Returning false since collection isn't available.
+			const query: any = {}
+
+			// Build search query based on provided language
+			if (search) {
+				query[`name.${lang}`] = { $regex: search, $options: "i" }
+			}
+
+			// Optional filters
+			if (typeof type === "number") query.type = type
+			if (typeof game === "number") query.game = game
+
+			// Pagination
+			const skip = (page - 1) * limit
+			const pipeline = [
+				// Match stage: filter documents based on search query and other criteria
+				{ $match: query },
+
+				// Pagination stages
+				{ $skip: skip },
+				{ $limit: limit },
+
+				// Compute default values for name and desc without losing existing dynamics.
+				{
+					$addFields: {
+						name: {
+							$cond: {
+								if: { $ifNull: [`$name.${lang}`, false] },
+								then: `$name.${lang}`,
+								else: {
+									$cond: {
+										if: { $ifNull: [`$name.EN`, false] },
+										then: `$name.EN`,
+										else: {
+											$let: {
+												vars: {
+													firstKeyValue: { $arrayElemAt: [{ $objectToArray: "$name" }, 0] }
+												},
+												in: "$$firstKeyValue.v"
+											}
+										}
+									}
+								}
+							}
+						},
+						desc: {
+							$cond: {
+								if: { $ifNull: [`$desc.${lang}`, false] },
+								then: `$desc.${lang}`,
+								else: {
+									$cond: {
+										if: { $ifNull: [`$desc.EN`, false] },
+										then: `$desc.EN`,
+										else: {
+											$let: {
+												vars: {
+													firstKeyValue: { $arrayElemAt: [{ $objectToArray: "$desc" }, 0] }
+												},
+												in: "$$firstKeyValue.v"
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				},
+
+				// Exclude the original undesired fields. With a projection that only excludes, every other field passes through.
+				{
+					$project: {
+						_id: 0 // remove MongoDB’s default _id field
+						//name: 0, // change the original multilingual name object
+						//desc: 0 // change the original multilingual description object
+						// Notice we don't list dynamic fields like "weaponType" etc.
+					}
+				}
+			]
+
+			const processedResult = await cItem.aggregate(pipeline).toArray()
+
+			// Process each item to set nameDefault
+			if (processedResult.length > 0) {
+				return {
+					message: "api_db_book_get_success",
+					retcode: 0,
+					data: processedResult
+				}
+			} else {
+				return {
+					message: "api_db_book_notfound",
+					retcode: -1,
+					data: null
+				}
+			}
+		} catch (error) {
+			log.error(error)
+			return {
+				message: "api_db_book_error",
+				retcode: -1,
+				data: null
+			}
 		}
-		const existingDoc = await collection.findOne({ id, type });
-		return existingDoc !== null;
+	},
+	itemExists: async function (id: number, type: number): Promise<boolean> {
+		await DBMongo.isConnected()
+
+		const collection = DBMongo.getCollection<ItemData>("book")
+		if (!collection) {
+			log.errorNoStack("api_db_nofound_collection_book")
+			return false // Returning false since collection isn't available.
+		}
+		const existingDoc = await collection.findOne({ id, type })
+		return existingDoc !== null
 	},
 	itemAdd: async function (obj: ItemData, rebuild: boolean = false): Promise<void> {
 		const { id, type } = obj
 
-		await DBMongo.isConnected();
+		await DBMongo.isConnected()
 
 		const collection = DBMongo.getCollection<ItemData>("book")
 		if (!collection) {
@@ -92,6 +213,12 @@ export const _ = {
 		fallbackUrl: string = "" // fallback url
 	): Promise<string> {
 		if (!sourceUrlorLocal) return ""
+
+		if (await fileExists(localFile)) {
+			log.info(`File ${localFile} already exists`)
+			// TODO: check if real valid file
+			return urlPublic
+		}
 
 		const isRemote = isValidUrl(sourceUrlorLocal)
 		log.info(`isRemote: ${isRemote} for ${sourceUrlorLocal} > ${localFile} > ${urlPublic}`)
@@ -196,8 +323,7 @@ export const _ = {
 		}
 
 		try {
-
-			await DBMongo.isConnected();
+			await DBMongo.isConnected()
 
 			const cProp = DBMongo.getCollection<Prop>("prop")
 			if (!cProp) {
@@ -248,8 +374,7 @@ export const _ = {
 	},
 	getProp: async function (field: string): Promise<PropRsp> {
 		try {
-
-			await DBMongo.isConnected();
+			await DBMongo.isConnected()
 
 			let cProp = DBMongo.getCollection<Prop>("prop")
 
