@@ -22,7 +22,146 @@ export interface PropRsp {
 	data: Prop | null
 }
 
+// Class (for mapping)
+export class ClassAvatarExcel {
+	[key: string]: AvatarExcel
+	constructor(data: Record<string, AvatarExcel>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassItemExcel {
+	[key: string]: ItemExcel
+	constructor(data: Record<string, ItemExcel>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassMonsterExcel {
+	[key: string]: MonsterExcel
+	constructor(data: Record<string, MonsterExcel>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassMonsterNameExcel {
+	[key: string]: MonsterNameExcel
+	constructor(data: Record<string, MonsterNameExcel>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassMonsterNameSpecialExcel {
+	[key: string]: MonsterNameSpecialExcel
+	constructor(data: Record<string, MonsterNameSpecialExcel>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassWeaponExcel {
+	[key: string]: WeaponExcel
+	constructor(data: Record<string, WeaponExcel>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassSceneExcel {
+	[key: string]: SceneExcel
+	constructor(data: Record<string, SceneExcel>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassGadgetExcel {
+	[key: string]: GadgetExcel
+	constructor(data: Record<string, GadgetExcel>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassReliquaryExcel {
+	[key: string]: ReliquaryExcel
+	constructor(data: Record<string, ReliquaryExcel>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassReliquaryMainPropExcel {
+	[key: string]: ReliquaryMainPropExcel
+	constructor(data: Record<string, ReliquaryMainPropExcel>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassReliquaryAffixExcel {
+	[key: string]: ReliquaryAffixExcel
+	constructor(data: Record<string, ReliquaryAffixExcel>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassManualTextMapExcel {
+	[key: string]: ManualTextMapExcel
+	constructor(data: Record<string, ManualTextMapExcel>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassReliquaryLevelExcel {
+	[key: string]: ReliquaryLevelExcel
+	constructor(data: Record<string, ReliquaryLevelExcel>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassQuestExcel {
+	[key: string]: QuestExcel
+	constructor(data: Record<string, QuestExcel>) {
+		Object.assign(this, data)
+	}
+}
+
 // In Excel (Game Resource)
+export interface ReliquaryExcel {
+	id: number
+	nameTextMapHash: number
+	descTextMapHash: number
+	icon: string
+	equipType: string
+	destroyRule: string
+	mainPropDepotId: number
+	appendPropDepotId: number
+	rankLevel: number
+}
+export interface ReliquaryMainPropExcel {
+	id: number
+	propType: string
+	propDepotId: number
+}
+export interface ReliquaryAffixExcel {
+	id: number
+	propType: string
+	depotId: number
+	propValue: number
+}
+export interface ReliquaryLevelExcel {
+	level: number
+	rank: number
+	addProps: {
+		propType: string
+		value: number
+	}[]
+}
+export interface ManualTextMapExcel {
+	textMapId: string
+	textMapContentTextMapHash: string
+}
+export interface GadgetExcel {
+	id: number
+	nameTextMapHash: number
+	interactNameTextMapHash: number
+	type: string
+	jsonName: string
+}
+export interface QuestExcel {
+	mainId: number
+	subId: number
+	descTextMapHash: number
+	stepDescTextMapHash: number
+	guideTipsTextMapHash: number
+	showType: string
+	order: number
+	// dim wrong
+	failCondComb: string // > showType
+	failParent: string // > descTextMapHash
+}
 export interface SceneExcel {
 	id: number
 	scriptData: string
@@ -133,4 +272,42 @@ export interface ItemScene extends ItemData {
 	type: 5
 	// detail
 	typeScene?: string
+}
+export interface ItemGadget extends ItemData {
+	// always from type 6 for gadget
+	type: 6
+	// detail
+	typeGadget?: string
+}
+export interface ItemArtifactMain extends ItemData {
+	// always from type 7 for artifact main
+	type: 7
+	// detail
+	grup?: number
+}
+export interface ItemArtifactSub extends ItemData {
+	// always from type 8 for artifact sub
+	type: 8
+	// detail
+	grup?: number
+}
+export interface ItemArtifactConfig extends ItemData {
+	// always from type 9 for artifact config
+	type: 9
+	// detail
+	equipType?: string
+	mainPropDepotId?: number
+	appendPropDepotId?: number
+	rankLevel?: number
+}
+export interface ItemQuest extends ItemData {
+	// always from type 10 for quest
+	type: 10
+	// detail
+	//mainId?: number
+	subId?: number
+	stepDesc?: Record<string, string> 
+	guideTips?: Record<string, string> 
+	showType?: string
+	order?: number
 }

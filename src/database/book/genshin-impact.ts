@@ -1,24 +1,35 @@
 import Logger from "@UT/logger"
 import {
-	AvatarExcel,
+	ClassAvatarExcel,
+	ClassGadgetExcel,
+	ClassItemExcel,
+	ClassManualTextMapExcel,
+	ClassMonsterExcel,
+	ClassMonsterNameExcel,
+	ClassMonsterNameSpecialExcel,
+	ClassQuestExcel,
+	ClassReliquaryAffixExcel,
+	ClassReliquaryExcel,
+	ClassReliquaryLevelExcel,
+	ClassReliquaryMainPropExcel,
+	ClassSceneExcel,
+	ClassWeaponExcel,
+	ItemArtifactConfig,
+	ItemArtifactMain,
+	ItemArtifactSub,
 	ItemAvatar,
-	ItemData,
-	ItemExcel,
+	ItemGadget,
 	ItemMonster,
 	ItemNormal,
+	ItemQuest,
 	ItemScene,
-	ItemWeapon,
-	MonsterExcel,
-	MonsterNameExcel,
-	MonsterNameSpecialExcel,
-	SceneExcel,
-	WeaponExcel
+	ItemWeapon
 } from "@UT/response"
-import { isEmpty, readJsonFileAsync, sleep } from "@UT/library"
+import { isEmpty } from "@UT/library"
 import { domainPublic } from "@UT/share"
+import ExcelManager from "@UT/excel"
 // thrid party
 import { isMainThread } from "worker_threads"
-import { SetIntervalAsyncTimer } from "set-interval-async"
 // datebase
 import General from "@DB/book/general"
 
@@ -27,12 +38,44 @@ const log = new Logger("Update")
 export const REPO_GI = "Dimbreath/AnimeGameData"
 export const FOLDER_GI = "./src/server/web/public/resources/genshin-impact"
 export const LANG_GI = ["CHS", "CHT", "DE", "EN", "ES", "FR", "ID", "IT", "JP", "KR", "PT", "RU", "TR", "VI"] // TODO: TH_0,TH_1
+export const EXCEL_GI = {
+	"AvatarExcelConfigData.json": ClassAvatarExcel,
+	"MaterialExcelConfigData.json": ClassItemExcel,
+	"HomeWorldFurnitureExcelConfigData.json": ClassItemExcel,
+	"MonsterExcelConfigData.json": ClassMonsterExcel,
+	"MonsterDescribeExcelConfigData.json": ClassMonsterNameExcel,
+	"MonsterSpecialNameExcelConfigData.json": ClassMonsterNameSpecialExcel,
+	"WeaponExcelConfigData.json": ClassWeaponExcel,
+	"SceneExcelConfigData.json": ClassSceneExcel,
+	"GadgetExcelConfigData.json": ClassGadgetExcel,
+	"ManualTextMapConfigData.json": ClassManualTextMapExcel,
+	"ReliquaryExcelConfigData.json": ClassReliquaryExcel,
+	"ReliquaryMainPropExcelConfigData.json": ClassReliquaryMainPropExcel,
+	"ReliquaryAffixExcelConfigData.json": ClassReliquaryAffixExcel,
+	"ReliquaryLevelExcelConfigData.json": ClassReliquaryLevelExcel,
+	"QuestExcelConfigData.json": ClassQuestExcel // TODO: maybe we need use yuuki res (because dim never update this or it is incomplete.)
+	//"ExcelBinOutput/AvatarCurveExcelConfigData.json": ItemReliquary,
+} as const
 // file only in PC not in server (TODO: auto move file local to server)
 export const DUMP_GI = "../../../../Docker/GS/gs/GC-Resources/tool/resources_tmp/dump"
 
-class GI {
-	private timeUpdate: SetIntervalAsyncTimer<[]> | undefined
+// GI function
+function Calculate(name: string, finalValue: number): string {
+	if (
+		name.includes("PERCENT") ||
+		name.includes("CRITICAL") ||
+		name.includes("CHARGE") ||
+		name.includes("HURT") ||
+		name.includes("HEAL")
+	) {
+		return `${(finalValue * 100).toFixed(2)}%`
+	} else {
+		return `+${Math.floor(finalValue)}`
+	}
+}
 
+class GI {
+	private excel!: ExcelManager<typeof EXCEL_GI>
 	constructor() {
 		if (isMainThread) {
 			log.info(`This is GI main thread`)
@@ -46,7 +89,7 @@ class GI {
 
 		// TODO: move to config
 		let demo = true
-		let rebuild = true
+		let rebuild = false
 
 		if (!(await General.checkGit(REPO_GI, "commit_gi", demo))) {
 			log.info(`No update available`)
@@ -55,29 +98,374 @@ class GI {
 		log.info(`Update available`)
 
 		log.info(`Downloading localization files`)
-
 		for (const lang of LANG_GI) {
 			await General.downloadGit(REPO_GI, FOLDER_GI, `TextMap/TextMap${lang}.json`, demo)
 		}
 
-		//await this.runAvatar(demo, rebuild)
-		//await this.runItem(demo, rebuild)
-		//await this.runMonster(demo, rebuild)
-		//await this.runWeapon(demo, rebuild)
-		await this.runScene(demo, rebuild)
+		log.info(`Downloading Excel files`)
+		this.excel = new ExcelManager(REPO_GI, FOLDER_GI, EXCEL_GI, demo)
+		await this.excel.loadFiles()
+
+		log.info(`Building item data`)
+		await this.runAvatar(rebuild)
+		await this.runItem(rebuild)
+		await this.runMonster(rebuild)
+		await this.runWeapon(rebuild)
+		await this.runScene(rebuild)
+		await this.runGadget(rebuild)
+		await this.runReliquary(rebuild)
+		await this.runQuest(rebuild)
 	}
 
-	async runScene(skip: boolean, rebuild: boolean): Promise<void> {
-		var urlDL = `ExcelBinOutput/SceneExcelConfigData.json`
-		const savePath = await General.downloadGit(REPO_GI, FOLDER_GI, urlDL, skip)
-		if (savePath == "") {
-			log.errorNoStack(`Error download file: ${urlDL}`)
+	async runQuest(rebuild: boolean): Promise<void> {
+		const getQuest = this.excel.getConfig("QuestExcelConfigData.json")
+		if (!getQuest) {
+			log.errorNoStack(`Error get QuestExcelConfigData.json`)
+			return
+		}
+		for (const data of Object.values(getQuest)) {
+			if (data) {
+				const idMain = data.mainId
+				const idSub = data.subId
+				const hashDesc = data.failParent // descTextMapHash
+				const hashStep = data.stepDescTextMapHash
+				const hashGuide = data.guideTipsTextMapHash
+
+				const obj: ItemQuest = {
+					type: 10, // 10=quest
+					game: 1,
+					id: idMain,
+					subId: idSub,
+					name: {},
+					desc: {},
+					guideTips: {},
+					icon: "",
+					showType: data.failCondComb, // showType
+					order: data.order
+				}
+
+				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+					log.info(`Quest already exists, skipping ${obj.id} (${obj.type})`)
+					continue
+				}
+
+				if (!isEmpty(hashDesc)) {
+					obj.name = General.addMultiLangNamesAsObject(hashDesc.toString(), LANG_GI, FOLDER_GI, obj.game)
+				} else {
+					obj.name = {
+						EN: `UNKN-${idMain}-${idSub}`
+					}
+				}
+
+				if (!isEmpty(hashStep)) {
+					obj.desc = General.addMultiLangNamesAsObject(hashStep.toString(), LANG_GI, FOLDER_GI, obj.game)
+				} else {
+					obj.desc = {
+						EN: `UNKS-${idMain}-${idSub}`
+					}
+				}
+
+				if (!isEmpty(hashGuide)) {
+					obj.guideTips = General.addMultiLangNamesAsObject(
+						hashGuide.toString(),
+						LANG_GI,
+						FOLDER_GI,
+						obj.game
+					)
+				} else {
+					obj.guideTips = {
+						EN: `UNKG-${idMain}-${idSub}`
+					}
+				}
+
+				//log.info("quest data:", obj)
+
+				// add to datebase
+				var isAdd = await General.itemAdd(obj, rebuild)
+				log.info(`Quest add > ${obj.id} (${obj.type}) is rebuild: ${rebuild} = db ${isAdd}`)
+
+				//await sleep(5)
+			} else {
+				log.info("skip", data)
+			}
+		}
+	}
+
+	async runReliquary(rebuild: boolean): Promise<void> {
+		// Lock basic stats (TODO: remove stats in name)
+		const maxLevel = 21
+		const maxRank = 5
+
+		const getManualTextMap = this.excel.getConfig("ManualTextMapConfigData.json")
+		if (!getManualTextMap) {
+			log.errorNoStack(`Error get ManualTextMapConfigData.json`)
+			return
+		}
+		const getReliquaryConfig = this.excel.getConfig("ReliquaryExcelConfigData.json")
+		if (!getReliquaryConfig) {
+			log.errorNoStack(`Error get ReliquaryExcelConfigData.json`)
+			return
+		}
+		const getReliquaryMain = this.excel.getConfig("ReliquaryMainPropExcelConfigData.json")
+		if (!getReliquaryMain) {
+			log.errorNoStack(`Error get ReliquaryMainPropExcelConfigData.json`)
+			return
+		}
+		const getReliquarySub = this.excel.getConfig("ReliquaryAffixExcelConfigData.json")
+		if (!getReliquarySub) {
+			log.errorNoStack(`Error get ReliquaryAffixExcelConfigData.json`)
+			return
+		}
+		const getReliquaryLevel = this.excel.getConfig("ReliquaryLevelExcelConfigData.json")
+		if (!getReliquaryLevel) {
+			log.errorNoStack(`Error get ReliquaryLevelExcelConfigData.json`)
 			return
 		}
 
-		const getWeapon: Record<string, SceneExcel> = await readJsonFileAsync(savePath)
+		// Process Main Artifact
+		log.info(`Try to update Reliquary Main`)
+		for (const main of Object.values(getReliquaryMain)) {
+			const id = main.id
+			const getPropType = main.propType
 
-		for (const data of Object.values(getWeapon)) {
+			const hashEntry = Object.values(getManualTextMap).find((item) => item.textMapId === getPropType)
+			if (!hashEntry) {
+				log.warn(`ReliquaryMain not found`, name)
+				continue
+			}
+
+			const obj: ItemArtifactMain = {
+				type: 7, // 7=ArtifactMain
+				game: 1,
+				id,
+				name: {},
+				desc: {},
+				icon: "",
+				grup: main.propDepotId
+			}
+			if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+				log.info(`ReliquaryMain already exists, skipping ${obj.id} (${obj.type})`)
+				continue
+			}
+
+			let valueMain = 0
+			const TesLevel = Object.values(getReliquaryLevel).find(
+				(entry) =>
+					entry.level === maxLevel &&
+					entry.rank === maxRank &&
+					entry.addProps.some((prop) => prop.propType === getPropType)
+			)
+
+			if (!TesLevel) {
+				// If no corresponding level configuration found, skip this entry.
+				continue
+			} else {
+				const propFound = TesLevel.addProps.find((prop) => prop.propType === getPropType)
+				if (propFound) {
+					valueMain = propFound.value
+				}
+			}
+
+			const bonus = Calculate(getPropType, valueMain)
+
+			const mainPropHash = hashEntry.textMapContentTextMapHash
+			obj.name = General.addMultiLangNamesAsObject(
+				mainPropHash.toString(),
+				LANG_GI,
+				FOLDER_GI,
+				obj.game,
+				` (${bonus} > R${maxRank}LV${maxLevel})`
+			)
+
+			//log.info("reliquary main:", obj)
+
+			// add to datebase
+			var isAdd = await General.itemAdd(obj, rebuild)
+			log.info(`ReliquaryMain add > ${obj.id} (${obj.type}) is rebuild: ${rebuild} = db ${isAdd}`)
+		}
+
+		// Process Sub Artifact
+		log.info(`Try to update Reliquary Sub`)
+		for (const sub of Object.values(getReliquarySub)) {
+			const id = sub.id
+			const name = sub.propType
+
+			const hashEntry = Object.values(getManualTextMap).find((item) => item.textMapId === name)
+			if (!hashEntry) {
+				log.warn(`ReliquarySub not found`, name)
+				continue
+			}
+
+			const obj: ItemArtifactSub = {
+				type: 8, // 8=ArtifactSub
+				game: 1,
+				id,
+				name: {},
+				desc: {},
+				icon: "",
+				grup: sub.depotId
+			}
+
+			if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+				log.info(`ReliquarySub already exists, skipping ${obj.id} (${obj.type})`)
+				continue
+			}
+
+			const bonus = Calculate(name, sub.propValue)
+
+			const mainPropHash = hashEntry.textMapContentTextMapHash
+			obj.name = General.addMultiLangNamesAsObject(
+				mainPropHash.toString(),
+				LANG_GI,
+				FOLDER_GI,
+				obj.game,
+				` (${bonus})`
+			)
+
+			//log.info("reliquary sub:", obj)
+
+			// add to datebase
+			var isAdd = await General.itemAdd(obj, rebuild)
+			log.info(`ReliquarySub add > ${obj.id} (${obj.type}) is rebuild: ${rebuild} = db ${isAdd}`)
+		}
+
+		// Process Artifact (Item)
+		log.info(`Try to update Reliquary Config`)
+		for (const item of Object.values(getReliquaryConfig)) {
+			const nameItemHash = item.nameTextMapHash
+			const descriptionItemHash = item.descTextMapHash
+			const id = item.id
+			const rank = item.rankLevel
+			const iconName = item.icon
+			//const name = getHashLANG[hash] || getHashCN[hash] || 'N/A';
+
+			const hashEntry = Object.values(getManualTextMap).find((itemFind) => itemFind.textMapId === item.equipType)
+			if (!hashEntry) {
+				log.warn(`ReliquaryConfig not found`, nameItemHash)
+				continue
+			}
+			const nameIndexHash = hashEntry.textMapContentTextMapHash
+
+			const obj: ItemArtifactConfig = {
+				type: 9, // 9=ArtifactConfig
+				game: 1,
+				id,
+				name: {},
+				desc: {},
+				icon: "",
+				equipType: item.equipType,
+				mainPropDepotId: item.mainPropDepotId,
+				appendPropDepotId: item.appendPropDepotId,
+				rankLevel: rank
+			}
+			if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+				log.info(`ReliquaryConfig already exists, skipping ${obj.id} (${obj.type})`)
+				continue
+			}
+
+			obj.desc = General.addMultiLangNamesAsObject(descriptionItemHash.toString(), LANG_GI, FOLDER_GI, obj.game)
+
+			var nameList1 = General.addMultiLangNamesAsObject(nameItemHash.toString(), LANG_GI, FOLDER_GI, obj.game) // HEAD
+			var nameList2 = General.addMultiLangNamesAsObject(nameIndexHash.toString(), LANG_GI, FOLDER_GI, obj.game) // BODY
+
+			var name_final: Record<string, string> = {}
+			var nameLists = [nameList1, nameList2]
+			var allLangs = new Set<string>()
+			nameLists.forEach((n) => Object.keys(n).forEach((lang) => allLangs.add(lang)))
+			allLangs.forEach((lang) => {
+				name_final[lang] =
+					nameLists
+						.map((name) => name[lang])
+						.filter((text) => typeof text === "string" && text.trim() !== "")
+						.join(" - ") + ` (R${rank})`
+			})
+			/*
+			if (Object.keys(name_final).length === 0) {
+				name_final = {
+					EN: mName
+				}
+			}
+			*/
+			obj.name = name_final
+			if (!isEmpty(iconName)) {
+				obj.icon = await General.downloadImageOrCopyLocal(
+					`${DUMP_GI}/${iconName}.png`, // local file dump (private)
+					`${FOLDER_GI}/icon/artifact/${iconName}.png`, // local file (public)
+					`${domainPublic}/resources/genshin-impact/icon/artifact/${iconName}.png`, // url public
+					`https://upload-os-bbs.mihoyo.com/game_record/genshin/equip/${iconName}.png` // fallback url
+				)
+			}
+
+			//log.info("reliquary config:", obj)
+
+			// add to datebase
+			var isAdd = await General.itemAdd(obj, rebuild)
+			log.info(`ReliquaryConfig add > ${obj.id} (${obj.type}) is rebuild: ${rebuild} = db ${isAdd}`)
+		}
+	}
+
+	async runGadget(rebuild: boolean): Promise<void> {
+		const getGadget = this.excel.getConfig("GadgetExcelConfigData.json")
+		if (!getGadget) {
+			log.errorNoStack(`Error get GadgetExcelConfigData.json`)
+			return
+		}
+		for (const data of Object.values(getGadget)) {
+			if (data && data.id) {
+				const id = data.id
+				const nameJson = data.jsonName
+
+				const obj: ItemGadget = {
+					type: 6, // 6=gadget
+					game: 1,
+					id,
+					name: {},
+					desc: {},
+					icon: "", // TODO: add icon
+					typeGadget: data.type
+				}
+
+				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+					log.info(`Gadget already exists, skipping ${obj.id} (${obj.type})`)
+					continue
+				}
+
+				// add name
+				obj.desc = General.addMultiLangNamesAsObject(
+					data.nameTextMapHash.toString(),
+					LANG_GI,
+					FOLDER_GI,
+					obj.game
+				)
+				// add desc
+				obj.name = General.addMultiLangNamesAsObject(
+					data.interactNameTextMapHash.toString(),
+					LANG_GI,
+					FOLDER_GI,
+					obj.game,
+					nameJson
+				)
+
+				//log.info("gadget data:", obj)
+
+				// add to datebase
+				var isAdd = await General.itemAdd(obj, rebuild)
+				log.info(`Gadget add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
+
+				//await sleep(5)
+			} else {
+				log.info("skip", data)
+			}
+		}
+	}
+
+	async runScene(rebuild: boolean): Promise<void> {
+		const getScene = this.excel.getConfig("SceneExcelConfigData.json")
+		if (!getScene) {
+			log.errorNoStack(`Error get SceneExcelConfigData.json`)
+			return
+		}
+		for (const data of Object.values(getScene)) {
 			if (data && data.id) {
 				const id = data.id
 
@@ -92,8 +480,7 @@ class GI {
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
-					log.info("Item already exists, skipping", obj)
-					//await sleep(5)
+					log.info(`Scene already exists, skipping ${obj.id} (${obj.type})`)
 					continue
 				}
 
@@ -104,10 +491,11 @@ class GI {
 					EN: name
 				}
 
-				log.info("scene data:", obj)
+				//log.info("scene data:", obj)
 
 				// add to datebase
-				await General.itemAdd(obj, rebuild)
+				var isAdd = await General.itemAdd(obj, rebuild)
+				log.info(`Scene add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
 
 				//await sleep(5)
 			} else {
@@ -116,16 +504,12 @@ class GI {
 		}
 	}
 
-	async runWeapon(skip: boolean, rebuild: boolean): Promise<void> {
-		var urlDL = `ExcelBinOutput/WeaponExcelConfigData.json`
-		const savePath = await General.downloadGit(REPO_GI, FOLDER_GI, urlDL, skip)
-		if (savePath == "") {
-			log.errorNoStack(`Error download file: ${urlDL}`)
+	async runWeapon(rebuild: boolean): Promise<void> {
+		const getWeapon = this.excel.getConfig("WeaponExcelConfigData.json")
+		if (!getWeapon) {
+			log.errorNoStack(`Error get WeaponExcelConfigData.json`)
 			return
 		}
-
-		const getWeapon: Record<string, WeaponExcel> = await readJsonFileAsync(savePath)
-
 		for (const data of Object.values(getWeapon)) {
 			if (data && data.nameTextMapHash) {
 				const hash = data.nameTextMapHash
@@ -144,8 +528,7 @@ class GI {
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
-					log.info("Item already exists, skipping", obj)
-					//await sleep(5)
+					log.info(`Weapon already exists, skipping ${obj.id} (${obj.type})`)
 					continue
 				}
 
@@ -159,10 +542,11 @@ class GI {
 				// add name
 				obj.name = General.addMultiLangNamesAsObject(hash.toString(), LANG_GI, FOLDER_GI, obj.game)
 
-				log.info("weapon data:", obj)
+				//log.info("weapon data:", obj)
 
 				// add to datebase
-				await General.itemAdd(obj, rebuild)
+				var isAdd = await General.itemAdd(obj, rebuild)
+				log.info(`Weapon add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
 
 				//await sleep(5)
 			} else {
@@ -171,28 +555,22 @@ class GI {
 		}
 	}
 
-	async runMonster(skip: boolean, rebuild: boolean): Promise<void> {
-		var urlDL1 = `ExcelBinOutput/MonsterExcelConfigData.json`
-		const savePath1 = await General.downloadGit(REPO_GI, FOLDER_GI, urlDL1, skip)
-		if (savePath1 == "") {
-			log.errorNoStack(`Error download file: ${urlDL1}`)
+	async runMonster(rebuild: boolean): Promise<void> {
+		const getMonsterData = this.excel.getConfig("MonsterExcelConfigData.json")
+		if (!getMonsterData) {
+			log.errorNoStack(`Error get MonsterExcelConfigData.json`)
 			return
 		}
-		const urlDL2 = `ExcelBinOutput/MonsterDescribeExcelConfigData.json`
-		const savePath2 = await General.downloadGit(REPO_GI, FOLDER_GI, urlDL2, skip)
-		if (savePath2 == "") {
-			log.errorNoStack(`Error download file: ${urlDL2}`)
+		const getMonsterNama = this.excel.getConfig("MonsterDescribeExcelConfigData.json")
+		if (!getMonsterNama) {
+			log.errorNoStack(`Error get MonsterDescribeExcelConfigData.json`)
 			return
 		}
-		const urlDL3 = `ExcelBinOutput/MonsterSpecialNameExcelConfigData.json`
-		const savePath3 = await General.downloadGit(REPO_GI, FOLDER_GI, urlDL3, skip)
-		if (savePath3 == "") {
-			log.errorNoStack(`Error download file: ${urlDL3}`)
+		const getMonsterNameSpecialExcel = this.excel.getConfig("MonsterSpecialNameExcelConfigData.json")
+		if (!getMonsterNameSpecialExcel) {
+			log.errorNoStack(`Error get MonsterSpecialNameExcelConfigData.json`)
 			return
 		}
-		const getMonsterData: Record<string, MonsterExcel> = await readJsonFileAsync(savePath1)
-		const getMonsterNama: Record<string, MonsterNameExcel> = await readJsonFileAsync(savePath2)
-		const getMonsterNameSpecialExcel: Record<string, MonsterNameSpecialExcel> = await readJsonFileAsync(savePath3)
 
 		for (const data of Object.values(getMonsterData)) {
 			if (data && data.nameTextMapHash) {
@@ -215,8 +593,7 @@ class GI {
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
-					log.info("Item already exists, skipping", obj)
-					//await sleep(5)
+					log.info(`Monster already exists, skipping ${obj.id} (${obj.type})`)
 					continue
 				}
 
@@ -308,10 +685,11 @@ class GI {
 				}
 				obj.name = name_final
 
-				log.info("monster data:", obj)
+				//log.info("monster data:", obj)
 
 				// add to datebase
-				await General.itemAdd(obj, rebuild)
+				var isAdd = await General.itemAdd(obj, rebuild)
+				log.info(`Monster add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
 
 				//await sleep(5)
 			} else {
@@ -320,22 +698,16 @@ class GI {
 		}
 	}
 
-	async runItem(skip: boolean, rebuild: boolean): Promise<void> {
-		// add only normal item
-		const filePaths = [
-			"ExcelBinOutput/MaterialExcelConfigData.json",
-			"ExcelBinOutput/HomeWorldFurnitureExcelConfigData.json"
-			//"ExcelBinOutput/WeaponExcelConfigData.json",
-			//"ExcelBinOutput/ReliquaryExcelConfigData.json",
-		]
-		for (const urlDL of filePaths) {
-			const savePath = await General.downloadGit(REPO_GI, FOLDER_GI, urlDL, skip)
-			if (savePath == "") {
-				log.errorNoStack(`Error download file: ${urlDL}`)
+	async runItem(rebuild: boolean): Promise<void> {
+		for (const [filePath, clazz] of Object.entries(EXCEL_GI)) {
+			if (clazz !== ClassItemExcel) continue
+
+			log.info(`Try to update ${filePath} data`)
+			const getItem = this.excel.getConfig(filePath as keyof typeof EXCEL_GI) as ClassItemExcel
+			if (!getItem) {
+				log.errorNoStack(`Error get ${filePath}`)
 				return
 			}
-
-			const getItem: Record<string, ItemExcel> = await readJsonFileAsync(savePath)
 
 			for (const data of Object.values(getItem)) {
 				if (data && data.nameTextMapHash) {
@@ -358,8 +730,7 @@ class GI {
 					}
 
 					if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
-						log.info("Item already exists, skipping", obj)
-						//await sleep(5)
+						log.info(`Item already exists, skipping ${obj.id} (${obj.type})`)
 						continue
 					}
 
@@ -385,10 +756,11 @@ class GI {
 						obj.game
 					)
 
-					log.info("item data:", obj)
+					//log.info("item data:", obj)
 
 					// add to datebase
-					await General.itemAdd(obj, rebuild)
+					var isAdd = await General.itemAdd(obj, rebuild)
+					log.info(`Item add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
 
 					//await sleep(5)
 				} else {
@@ -398,16 +770,13 @@ class GI {
 		}
 	}
 
-	async runAvatar(skip: boolean, rebuild: boolean): Promise<void> {
-		var urlDL = `ExcelBinOutput/AvatarExcelConfigData.json`
-		const savePath = await General.downloadGit(REPO_GI, FOLDER_GI, urlDL, skip)
-		if (savePath == "") {
-			log.errorNoStack(`Error download file: ${urlDL}`)
+	async runAvatar(rebuild: boolean): Promise<void> {
+		log.info(`Try to update Avatar data`)
+		const getAvatar = this.excel.getConfig("AvatarExcelConfigData.json")
+		if (!getAvatar) {
+			log.errorNoStack(`Error get AvatarExcelConfigData.json`)
 			return
 		}
-
-		const getAvatar: Record<string, AvatarExcel> = await readJsonFileAsync(savePath)
-
 		for (const data of Object.values(getAvatar)) {
 			if (data && data.nameTextMapHash) {
 				const id = data.id
@@ -428,8 +797,7 @@ class GI {
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
-					log.info("Item already exists, skipping", obj)
-					//await sleep(5)
+					log.info(`Avatar already exists, skipping ${obj.id} (${obj.type})`)
 					continue
 				}
 
@@ -455,10 +823,11 @@ class GI {
 					obj.game
 				)
 
-				log.info("Avatar data:", obj)
+				//log.info("Avatar data:", obj)
 
 				// add to datebase
-				await General.itemAdd(obj, rebuild)
+				var isAdd = await General.itemAdd(obj, rebuild)
+				log.info(`Avatar add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
 
 				//await sleep(5)
 			} else {

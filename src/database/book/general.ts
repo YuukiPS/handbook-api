@@ -154,7 +154,7 @@ export const _ = {
 		const existingDoc = await collection.findOne({ id, type })
 		return existingDoc !== null
 	},
-	itemAdd: async function (obj: ItemData, rebuild: boolean = false): Promise<void> {
+	itemAdd: async function (obj: ItemData, rebuild: boolean = false): Promise<boolean> {
 		const { id, type } = obj
 
 		await DBMongo.isConnected()
@@ -162,7 +162,7 @@ export const _ = {
 		const collection = DBMongo.getCollection<ItemData>("book")
 		if (!collection) {
 			log.errorNoStack("api_db_nofound_collection_book")
-			return
+			return false
 		}
 
 		if (rebuild) {
@@ -170,20 +170,24 @@ export const _ = {
 			const result = await collection.updateOne({ id, type }, { $set: obj }, { upsert: true })
 			// Log depending on whether the document was updated or inserted
 			if (result.upsertedId) {
-				log.info(`A document was inserted with the _id: ${result.upsertedId}`)
+				//log.info(`A document was inserted with the _id: ${result.upsertedId}`)
+				return true
 			} else {
-				log.info(`Existing document updated for id: ${id}`)
+				//log.warn(`Existing document updated for id: ${id}`)
+				return true
 			}
 		} else {
 			// Check if document already exists; insert if not.
 			const existingDoc = await collection.findOne({ id, type })
 			if (existingDoc == null) {
 				const result = await collection.insertOne(obj)
-				log.info(`A document was inserted with the _id: ${result.insertedId}`)
+				//log.info(`A document was inserted with the _id: ${result.insertedId}`)
+				return true
 			} else {
-				log.info("Already exist", id)
+				log.warn("Already exist", id)				
 			}
 		}
+		return false;
 	},
 	addMultiLangNamesAsObject: function (
 		hash: string,
@@ -197,12 +201,15 @@ export const _ = {
 		for (const lang of langList) {
 			const fullPath = `${folderPath}/TextMap/TextMap${lang}.json`
 			const getHashLANG = readJsonFileCached(fullPath)
-			var isValid = getHashLANG[hash] || custumName
+			var isValid = getHashLANG[hash]
 			if (isEmpty(isValid)) {
 				//log.errorNoStack("not found", hash, lang)
 				continue
 			}
-			names[lang] = isValid
+			names[lang] = isValid+custumName
+		}
+		if (Object.keys(names).length == 0) {
+			names["EN"] = custumName || `UNK-${hash}`
 		}
 		return names
 	},
