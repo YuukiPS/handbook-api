@@ -1,5 +1,19 @@
 import Logger from "@UT/logger"
-import { AvatarData, ItemAvatarGI, ItemData, MonsterData, MonsterNameData, NormalItemData, SceneData, WeaponData } from "@UT/response"
+import {
+	AvatarExcel,
+	ItemAvatar,
+	ItemData,
+	ItemExcel,
+	ItemMonster,
+	ItemNormal,
+	ItemScene,
+	ItemWeapon,
+	MonsterExcel,
+	MonsterNameExcel,
+	MonsterNameSpecialExcel,
+	SceneExcel,
+	WeaponExcel
+} from "@UT/response"
 import { isEmpty, readJsonFileAsync, sleep } from "@UT/library"
 import { domainPublic } from "@UT/share"
 // thrid party
@@ -50,7 +64,7 @@ class GI {
 		//await this.runItem(demo, rebuild)
 		//await this.runMonster(demo, rebuild)
 		//await this.runWeapon(demo, rebuild)
-        //await this.runScene(demo, rebuild)
+		await this.runScene(demo, rebuild)
 	}
 
 	async runScene(skip: boolean, rebuild: boolean): Promise<void> {
@@ -61,19 +75,20 @@ class GI {
 			return
 		}
 
-		const getWeapon: Record<string, SceneData> = await readJsonFileAsync(savePath)
+		const getWeapon: Record<string, SceneExcel> = await readJsonFileAsync(savePath)
 
 		for (const data of Object.values(getWeapon)) {
 			if (data && data.id) {
 				const id = data.id
 
-				const obj: ItemData = {
+				const obj: ItemScene = {
 					type: 5, // 5=scene
 					game: 1,
 					id,
 					name: {},
-                    desc: {},
-					icon: "" // TODO: add icon
+					desc: {},
+					icon: "", // TODO: add icon
+					typeScene: data.type
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -109,7 +124,7 @@ class GI {
 			return
 		}
 
-		const getWeapon: Record<string, WeaponData> = await readJsonFileAsync(savePath)
+		const getWeapon: Record<string, WeaponExcel> = await readJsonFileAsync(savePath)
 
 		for (const data of Object.values(getWeapon)) {
 			if (data && data.nameTextMapHash) {
@@ -117,13 +132,15 @@ class GI {
 				const id = data.id
 				const iconName = data.icon
 
-				const obj: ItemData = {
+				const obj: ItemWeapon = {
 					type: 4, // 4=weapon
 					game: 1,
 					id,
 					name: {},
-                    desc: {},
-					icon: ""
+					desc: {},
+					icon: "",
+					weaponType: data.weaponType,
+					rankLevel: data.rankLevel
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -167,23 +184,34 @@ class GI {
 			log.errorNoStack(`Error download file: ${urlDL2}`)
 			return
 		}
-		const getMonsterData: Record<string, MonsterData> = await readJsonFileAsync(savePath1)
-		const getMonsterNama: Record<string, MonsterNameData> = await readJsonFileAsync(savePath2)
+		const urlDL3 = `ExcelBinOutput/MonsterSpecialNameExcelConfigData.json`
+		const savePath3 = await General.downloadGit(REPO_GI, FOLDER_GI, urlDL3, skip)
+		if (savePath3 == "") {
+			log.errorNoStack(`Error download file: ${urlDL3}`)
+			return
+		}
+		const getMonsterData: Record<string, MonsterExcel> = await readJsonFileAsync(savePath1)
+		const getMonsterNama: Record<string, MonsterNameExcel> = await readJsonFileAsync(savePath2)
+		const getMonsterNameSpecialExcel: Record<string, MonsterNameSpecialExcel> = await readJsonFileAsync(savePath3)
 
 		for (const data of Object.values(getMonsterData)) {
 			if (data && data.nameTextMapHash) {
-				var hash = data.nameTextMapHash
+				var hashName1 = data.nameTextMapHash
 				const id = data.id
+
+				//if (id != 26230301) continue // demo only
+
 				const mName = data.monsterName
 				const varDP = data.describeId
 
-				const obj: ItemData = {
+				const obj: ItemMonster = {
 					type: 3, // 3=monster
 					game: 1,
 					id,
 					name: {},
-                    desc: {},
-					icon: ""
+					desc: {},
+					icon: "",
+					typeMonster: data.type
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -193,22 +221,40 @@ class GI {
 				}
 
 				var iconPath = ""
+				var hashName2 = 0
+				var hashName3 = 0
 
-				// some monster no have describe id (so skip download image)
-				var infoMonster = Object.values(getMonsterNama).find((item) => item.id === Number(varDP))
-				if (infoMonster) {
-					//log.warn("found monster", infoMonster);
-					iconPath = infoMonster.icon
-					hash = infoMonster.nameTextMapHash
-				} else {
-					//log.warn("not found monster", data);
-					infoMonster = Object.values(getMonsterNama).find((item) => item.icon.includes(mName))
-					if (infoMonster) {
-						iconPath = infoMonster.icon
-						hash = infoMonster.nameTextMapHash
-						//log.warn("found monster", infoMonster);
-					} else {
-						// TODO: find Partner icon
+				// find via describe Id
+				var infoMonster1 = Object.values(getMonsterNama).find((item) => item.id === Number(varDP))
+				if (infoMonster1) {
+					iconPath = infoMonster1.icon
+					hashName2 = infoMonster1.nameTextMapHash
+					//log.info("found monster0-1", infoMonster1)
+
+					var infoMonsterNameSpecial1 = Object.values(getMonsterNameSpecialExcel).find(
+						(item) => item.specialNameLabID === infoMonster1?.specialNameLabID
+					)
+
+					if (infoMonsterNameSpecial1) {
+						hashName3 = infoMonsterNameSpecial1.specialNameTextMapHash
+						//log.info("found monster0-2", infoMonsterNameSpecial1)
+					}
+				}
+
+				// find via icon monster name
+				var infoMonster2 = Object.values(getMonsterNama).find((item) => item.icon.includes(mName))
+				if (infoMonster2) {
+					iconPath = infoMonster2.icon
+					hashName2 = infoMonster2.nameTextMapHash
+					//log.info("found monster1-1", infoMonster2)
+
+					var infoMonsterNameSpecial2 = Object.values(getMonsterNameSpecialExcel).find(
+						(item) => item.specialNameLabID === infoMonster2?.specialNameLabID
+					)
+
+					if (infoMonsterNameSpecial2) {
+						hashName3 = infoMonsterNameSpecial2.specialNameTextMapHash
+						//log.info("found monster1-2", infoMonsterNameSpecial2)
 					}
 				}
 
@@ -222,7 +268,45 @@ class GI {
 				}
 
 				// add name
-				obj.name = General.addMultiLangNamesAsObject(hash.toString(), LANG_GI, FOLDER_GI, obj.game, mName)
+				var nameList1
+				if (!isEmpty(hashName1)) {
+					nameList1 = General.addMultiLangNamesAsObject(hashName1.toString(), LANG_GI, FOLDER_GI, obj.game)
+					//log.warn("found monster1", nameList1)
+				} else {
+					nameList1 = {}
+				}
+				var nameList2
+				if (!isEmpty(hashName2)) {
+					nameList2 = General.addMultiLangNamesAsObject(hashName2.toString(), LANG_GI, FOLDER_GI, obj.game)
+					//log.warn("found monster32", nameList2)
+				} else {
+					nameList2 = {}
+				}
+				var nameList3
+				if (!isEmpty(hashName3)) {
+					nameList3 = General.addMultiLangNamesAsObject(hashName3.toString(), LANG_GI, FOLDER_GI, obj.game)
+					//log.warn("found monster3", nameList3)
+				} else {
+					nameList3 = {}
+				}
+
+				//log.info(`hashName1: ${hashName1} - hashName2: ${hashName2} - hashName3: ${hashName3}`)
+				var name_final: Record<string, string> = {}
+				var nameLists = [nameList1, nameList2, nameList3]
+				var allLangs = new Set<string>()
+				nameLists.forEach((n) => Object.keys(n).forEach((lang) => allLangs.add(lang)))
+				allLangs.forEach((lang) => {
+					name_final[lang] = nameLists
+						.map((name) => name[lang])
+						.filter((text) => typeof text === "string" && text.trim() !== "")
+						.join(" - ")
+				})
+				if (Object.keys(name_final).length === 0) {
+					name_final = {
+						EN: mName
+					}
+				}
+				obj.name = name_final
 
 				log.info("monster data:", obj)
 
@@ -241,6 +325,8 @@ class GI {
 		const filePaths = [
 			"ExcelBinOutput/MaterialExcelConfigData.json",
 			"ExcelBinOutput/HomeWorldFurnitureExcelConfigData.json"
+			//"ExcelBinOutput/WeaponExcelConfigData.json",
+			//"ExcelBinOutput/ReliquaryExcelConfigData.json",
 		]
 		for (const urlDL of filePaths) {
 			const savePath = await General.downloadGit(REPO_GI, FOLDER_GI, urlDL, skip)
@@ -249,21 +335,26 @@ class GI {
 				return
 			}
 
-			const getItem: Record<string, NormalItemData> = await readJsonFileAsync(savePath)
+			const getItem: Record<string, ItemExcel> = await readJsonFileAsync(savePath)
 
 			for (const data of Object.values(getItem)) {
 				if (data && data.nameTextMapHash) {
-					const hash = data.nameTextMapHash
 					const id = data.id
 					const iconName = data.icon
 
-					const obj: ItemData = {
+					const obj: ItemNormal = {
 						type: 2, // 2=normal item
 						game: 1,
 						id,
 						name: {},
-                        desc: {},
-						icon: ""
+						desc: {},
+						icon: "",
+						rankLevel: data.rankLevel,
+						itemType: data.itemType,
+						materialType: data.materialType,
+						foodQuality: data.foodQuality,
+						specialFurnitureType: data.specialFurnitureType,
+						surfaceType: data.surfaceType
 					}
 
 					if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -280,7 +371,19 @@ class GI {
 					)
 
 					// add name
-					obj.name = General.addMultiLangNamesAsObject(hash.toString(), LANG_GI, FOLDER_GI, obj.game)
+					obj.name = General.addMultiLangNamesAsObject(
+						data.nameTextMapHash.toString(),
+						LANG_GI,
+						FOLDER_GI,
+						obj.game
+					)
+					// add desc
+					obj.desc = General.addMultiLangNamesAsObject(
+						data.descTextMapHash.toString(),
+						LANG_GI,
+						FOLDER_GI,
+						obj.game
+					)
 
 					log.info("item data:", obj)
 
@@ -303,7 +406,7 @@ class GI {
 			return
 		}
 
-		const getAvatar: Record<string, AvatarData> = await readJsonFileAsync(savePath)
+		const getAvatar: Record<string, AvatarExcel> = await readJsonFileAsync(savePath)
 
 		for (const data of Object.values(getAvatar)) {
 			if (data && data.nameTextMapHash) {
@@ -312,16 +415,16 @@ class GI {
 
 				if (id < 10000002 || id >= 11000000) continue
 
-				const obj: ItemAvatarGI = {
+				const obj: ItemAvatar = {
 					type: 1, // 1=avatar
 					game: 1,
 					id,
 					name: {},
-                    desc: {},
+					desc: {},
 					icon: "",
-                    weaponType: data.weaponType,
-                    qualityType: data.qualityType,
-                    bodyType: data.bodyType
+					weaponType: data.weaponType,
+					qualityType: data.qualityType,
+					bodyType: data.bodyType
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -338,9 +441,19 @@ class GI {
 				)
 
 				// add name
-				obj.name = General.addMultiLangNamesAsObject(data.nameTextMapHash.toString(), LANG_GI, FOLDER_GI, obj.game)
-                // add desc
-                obj.desc = General.addMultiLangNamesAsObject(data.descTextMapHash.toString(), LANG_GI, FOLDER_GI, obj.game)
+				obj.name = General.addMultiLangNamesAsObject(
+					data.nameTextMapHash.toString(),
+					LANG_GI,
+					FOLDER_GI,
+					obj.game
+				)
+				// add desc
+				obj.desc = General.addMultiLangNamesAsObject(
+					data.descTextMapHash.toString(),
+					LANG_GI,
+					FOLDER_GI,
+					obj.game
+				)
 
 				log.info("Avatar data:", obj)
 

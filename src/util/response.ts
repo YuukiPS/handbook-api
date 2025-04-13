@@ -23,12 +23,13 @@ export interface PropRsp {
 }
 
 // In Excel (Game Resource)
-export interface SceneData {
+export interface SceneExcel {
 	id: number
 	scriptData: string
 	levelEntityConfig: string
+	type: string
 }
-export interface AvatarData {
+export interface AvatarExcel {
 	id: number
 	nameTextMapHash: number
 	descTextMapHash: number
@@ -37,14 +38,14 @@ export interface AvatarData {
 	qualityType: string
 	bodyType: string
 }
-export interface WeaponData {
+export interface WeaponExcel {
 	id: number
 	nameTextMapHash: number
 	icon: string
 	weaponType: string
-	rankLevel: string
+	rankLevel: number
 }
-export interface MonsterData {
+export interface MonsterExcel {
 	id: number
 	nameTextMapHash: number
 	monsterName: string
@@ -53,19 +54,32 @@ export interface MonsterData {
 	LODPatternName: string
 	iconName: string
 }
-export interface MonsterNameData {
+export interface MonsterNameExcel {
 	icon: string
 	nameTextMapHash: number
 	id: number
 	specialNameLabID: number
 	titleID: number
 }
-export interface NormalItemData {
+export interface MonsterNameSpecialExcel {
+	specialNameLabID: number
+	specialNameID: number
+	specialNameTextMapHash: number
+}
+export interface ItemExcel {
 	id: number
 	nameTextMapHash: number
+	descTextMapHash: number
 	icon: string
-	//itemType: string;
-	//rankLevel: string;
+	rankLevel: number
+	itemType: string
+	// for material
+	materialType: string
+	// for food
+	foodQuality: string
+	// for furniture (house)
+	specialFurnitureType: string
+	surfaceType: string
 }
 
 // In Datebase
@@ -82,16 +96,41 @@ export interface ItemData {
 	desc: Record<string, string> // desc item
 	icon: string // icon item
 }
-//default data based on language fallback (json only)
-export interface ItemDefault extends ItemData {
-	nameDefault?: string
-	descDefault?: string
-}
-export interface ItemAvatarGI extends ItemData {
-	// away from type 1 for avatar
+export interface ItemAvatar extends ItemData {
+	// always from type 1 for avatar
 	type: 1
 	// detail
 	weaponType?: string
 	qualityType?: string
 	bodyType?: string
+}
+export interface ItemNormal extends ItemData {
+	// always from type 2 for normal item
+	type: 2
+	// detail
+	rankLevel?: number
+	itemType?: string
+	materialType?: string
+	foodQuality?: string
+	specialFurnitureType?: string
+	surfaceType?: string
+}
+export interface ItemMonster extends ItemData {
+	// always from type 3 for monster
+	type: 3
+	// detail
+	typeMonster?: string
+}
+export interface ItemWeapon extends ItemData {
+	// always from type 4 for weapon
+	type: 4
+	// detail
+	weaponType?: string
+	rankLevel?: number
+}
+export interface ItemScene extends ItemData {
+	// always from type 5 for scene
+	type: 5
+	// detail
+	typeScene?: string
 }

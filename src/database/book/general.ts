@@ -198,8 +198,8 @@ export const _ = {
 			const fullPath = `${folderPath}/TextMap/TextMap${lang}.json`
 			const getHashLANG = readJsonFileCached(fullPath)
 			var isValid = getHashLANG[hash] || custumName
-			if (isValid == undefined || isValid == null || isValid == "") {
-				log.errorNoStack("not found", hash, lang)
+			if (isEmpty(isValid)) {
+				//log.errorNoStack("not found", hash, lang)
 				continue
 			}
 			names[lang] = isValid
