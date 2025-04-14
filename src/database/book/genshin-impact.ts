@@ -1,8 +1,10 @@
 import Logger from "@UT/logger"
 import {
 	ClassAvatarExcelGI,
+	ClassAvatarSkillDepotExcelGI,
+	ClassAvatarSkillExcelGI,
 	ClassGadgetExcel,
-	ClassItemExcel,
+	ClassItemExcelGI,
 	ClassManualTextMapExcel,
 	ClassMonsterExcel,
 	ClassMonsterNameExcel,
@@ -33,17 +35,21 @@ import { isMainThread } from "worker_threads"
 // datebase
 import General from "@DB/book/general"
 
-const log = new Logger("GenshinImpact")
+const nameGame = "genshin-impact"
+
+const log = new Logger(nameGame.replace("-", " ").toLocaleUpperCase())
 
 export const REPO_GI = "Dimbreath/AnimeGameData"
 export const REPO_BRANCH_GI = "master"
 export const PATHBIN_GI = `ExcelBinOutput`
-export const FOLDER_GI = "./src/server/web/public/resources/genshin-impact"
+export const FOLDER_GI = `./src/server/web/public/resources/${nameGame}`
 export const LANG_GI = ["CHS", "CHT", "DE", "EN", "ES", "FR", "ID", "IT", "JP", "KR", "PT", "RU", "TR", "VI"] // TODO: TH_0,TH_1
 export const EXCEL_GI = {
 	"AvatarExcelConfigData.json": ClassAvatarExcelGI,
-	"MaterialExcelConfigData.json": ClassItemExcel,
-	"HomeWorldFurnitureExcelConfigData.json": ClassItemExcel,
+	"AvatarSkillDepotExcelConfigData.json": ClassAvatarSkillDepotExcelGI, // get depo skill
+	"AvatarSkillExcelConfigData.json": ClassAvatarSkillExcelGI, // get elemental skill
+	"MaterialExcelConfigData.json": ClassItemExcelGI,
+	"HomeWorldFurnitureExcelConfigData.json": ClassItemExcelGI,
 	"MonsterExcelConfigData.json": ClassMonsterExcel,
 	"MonsterDescribeExcelConfigData.json": ClassMonsterNameExcel,
 	"MonsterSpecialNameExcelConfigData.json": ClassMonsterNameSpecialExcel,
@@ -75,7 +81,80 @@ function Calculate(name: string, finalValue: number): string {
 		return `+${Math.floor(finalValue)}`
 	}
 }
-
+/*
+Data Weapon Star (5.5)
+1 - common (11)
+2 - ??? (5)
+3 - blue (28)
+4 - purple (123)
+5 - orange (71)
+*/
+// This should use only for avatar not for weapon, weapon rank is number so no need?
+function getStar(quality: string): number {
+	switch (quality) {
+		case "QUALITY_BLUE":
+		case "3":
+			return 3
+		case "QUALITY_PURPLE":
+		case "4":
+			return 4
+		case "QUALITY_ORANGE":
+		case "5":
+			return 5
+		case "QUALITY_ORANGE_SP": // lol only Aloy
+		case "6":
+			return 6
+		default:
+			return -1
+	}
+}
+enum WeaponType {
+	WEAPON_NONE = 0,
+	WEAPON_SWORD_ONE_HAND = 1,
+	WEAPON_CROSSBOW = 2,
+	WEAPON_STAFF = 3,
+	WEAPON_DOUBLE_DAGGER = 4,
+	WEAPON_KATANA = 5,
+	WEAPON_SHURIKEN = 6,
+	WEAPON_STICK = 7,
+	WEAPON_SPEAR = 8,
+	WEAPON_SHIELD_SMALL = 9,
+	WEAPON_CATALYST = 10,
+	WEAPON_CLAYMORE = 11,
+	WEAPON_BOW = 12,
+	WEAPON_POLE = 13
+}
+enum BodyType {
+	BODY_BOY = 1,
+	NPC_MALE = 1,
+	BODY_MALE = 1,
+	BODY_GIRL = 2,
+	BODY_LADY = 2,
+	NPC_FEMALE = 2,
+	BODY_LOLI = 2, // most girl and testing stuff here lol why hoyo
+}
+enum ElementType {
+	None = 0,
+	Fire = 1,
+	Water = 2,
+	Grass = 3,
+	Electric = 4,
+	Ice = 5,
+	Frozen = 6,
+	Wind = 7,
+	Rock = 8,
+	AntiFire = 9,
+	Default = 255
+}
+function getWeaponTypeNumber(name: string): number {
+	return (WeaponType as any)[name] ?? -1
+}
+function getBodyTypeNumber(name: string): number {
+	return (BodyType as any)[name] ?? -1
+}
+function getElementType(name: string): number {
+	return (ElementType as any)[name] ?? -1
+}
 class GI {
 	private excel!: ExcelManager<typeof EXCEL_GI>
 	constructor() {
@@ -86,14 +165,18 @@ class GI {
 		}
 	}
 
-	public async Update(skip_update: boolean = false, foce_save: boolean = false, dont_build: boolean = false): Promise<void> {
+	public async Update(
+		skip_update: boolean = false,
+		foce_save: boolean = false,
+		dont_build: boolean = false
+	): Promise<void> {
 		log.info(`Try to update Genshin Impact resources`)
 
-		var skip_dl = true;
+		var skip_dl = true
 		if (await General.checkGit(REPO_GI, "commit_gi", skip_update)) {
 			log.info(`Update available`)
 			skip_dl = false
-		}else{
+		} else {
 			log.info(`No update available: ${REPO_GI} > skip? ${skip_update}`)
 		}
 
@@ -106,7 +189,7 @@ class GI {
 		this.excel = new ExcelManager(REPO_GI, FOLDER_GI, EXCEL_GI, skip_dl, REPO_BRANCH_GI, PATHBIN_GI)
 		await this.excel.loadFiles()
 
-		if(dont_build){
+		if (dont_build) {
 			log.info(`Skip build item data`)
 			return
 		}
@@ -143,6 +226,7 @@ class GI {
 					subId: idSub,
 					name: {},
 					desc: {},
+					desc2: {},
 					guideTips: {},
 					icon: "",
 					showType: data.failCondComb, // showType
@@ -245,6 +329,7 @@ class GI {
 				id,
 				name: {},
 				desc: {},
+				desc2: {},
 				icon: "",
 				grup: main.propDepotId
 			}
@@ -307,6 +392,7 @@ class GI {
 				id,
 				name: {},
 				desc: {},
+				desc2: {},
 				icon: "",
 				grup: sub.depotId
 			}
@@ -357,6 +443,7 @@ class GI {
 				id,
 				name: {},
 				desc: {},
+				desc2: {},
 				icon: "",
 				equipType: item.equipType,
 				mainPropDepotId: item.mainPropDepotId,
@@ -396,7 +483,7 @@ class GI {
 				obj.icon = await General.downloadImageOrCopyLocal(
 					`${DUMP_GI}/${iconName}.png`, // local file dump (private)
 					`${FOLDER_GI}/icon/artifact/${iconName}.png`, // local file (public)
-					`${domainPublic}/resources/genshin-impact/icon/artifact/${iconName}.png`, // url public
+					`${domainPublic}/resources/${nameGame}/icon/artifact/${iconName}.png`, // url public
 					`https://upload-os-bbs.mihoyo.com/game_record/genshin/equip/${iconName}.png` // fallback url
 				)
 			}
@@ -426,6 +513,7 @@ class GI {
 					id,
 					name: {},
 					desc: {},
+					desc2: {},
 					icon: "", // TODO: add icon
 					typeGadget: data.type
 				}
@@ -480,6 +568,7 @@ class GI {
 					id,
 					name: {},
 					desc: {},
+					desc2: {},
 					icon: "", // TODO: add icon
 					typeScene: data.type
 				}
@@ -527,9 +616,10 @@ class GI {
 					id,
 					name: {},
 					desc: {},
+					desc2: {},
 					icon: "",
-					weaponType: data.weaponType,
-					rankLevel: data.rankLevel
+					starType: getStar(data.rankLevel.toString()), // data.qualityType || data.rankLevel.toString()
+					weaponType: getWeaponTypeNumber(data.weaponType)
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -540,7 +630,7 @@ class GI {
 				obj.icon = await General.downloadImageOrCopyLocal(
 					`${DUMP_GI}/${iconName}.png`, // local file dump (private)
 					`${FOLDER_GI}/icon/weapon/${iconName}.png`, // local file (public)
-					`${domainPublic}/resources/genshin-impact/icon/weapon/${iconName}.png`, // url public
+					`${domainPublic}/resources/${nameGame}/icon/weapon/${iconName}.png`, // url public
 					`https://feixiaoqiu.com/static/images/weapon/${iconName}.png` // fallback url
 				)
 
@@ -593,6 +683,7 @@ class GI {
 					id,
 					name: {},
 					desc: {},
+					desc2: {},
 					icon: "",
 					typeMonster: data.type
 				}
@@ -644,7 +735,7 @@ class GI {
 					obj.icon = await General.downloadImageOrCopyLocal(
 						`${DUMP_GI}/${iconPath}.png`, // local file dump (private)
 						`${FOLDER_GI}/icon/monster/${iconPath}.png`, // local file (public)
-						`${domainPublic}/resources/genshin-impact/icon/monster/${iconPath}.png`, // url public
+						`${domainPublic}/resources/${nameGame}/icon/monster/${iconPath}.png`, // url public
 						`https://enka.network/ui/${iconPath}.png` // fallback url
 					)
 				}
@@ -705,10 +796,10 @@ class GI {
 
 	async runItem(rebuild: boolean): Promise<void> {
 		for (const [filePath, clazz] of Object.entries(EXCEL_GI)) {
-			if (clazz !== ClassItemExcel) continue
+			if (clazz !== ClassItemExcelGI) continue
 
 			log.info(`Try to update ${filePath} data`)
-			const getItem = this.excel.getConfig(filePath as keyof typeof EXCEL_GI) as ClassItemExcel
+			const getItem = this.excel.getConfig(filePath as keyof typeof EXCEL_GI) as ClassItemExcelGI
 			if (!getItem) {
 				log.errorNoStack(`Error get ${filePath}`)
 				return
@@ -725,9 +816,11 @@ class GI {
 						id,
 						name: {},
 						desc: {},
+						desc2: {},
 						icon: "",
-						rankLevel: data.rankLevel,
+						starType: data.rankLevel, // TODO: maybe need string?
 						itemType: data.itemType,
+						// other
 						materialType: data.materialType,
 						foodQuality: data.foodQuality,
 						specialFurnitureType: data.specialFurnitureType,
@@ -742,7 +835,7 @@ class GI {
 					obj.icon = await General.downloadImageOrCopyLocal(
 						`${DUMP_GI}/${iconName}.png`, // local file dump (private)
 						`${FOLDER_GI}/icon/item/${iconName}.png`, // local file (public)
-						`${domainPublic}/resources/genshin-impact/icon/item/${iconName}.png`, // url public
+						`${domainPublic}/resources/${nameGame}/icon/item/${iconName}.png`, // url public
 						`https://enka.network/ui/${iconName}.png` // fallback url
 					)
 
@@ -782,12 +875,43 @@ class GI {
 			log.errorNoStack(`Error get AvatarExcelConfigData.json`)
 			return
 		}
+		const getAvatarSkillDepot = this.excel.getConfig("AvatarSkillDepotExcelConfigData.json")
+		if (!getAvatarSkillDepot) {
+			log.errorNoStack(`Error get AvatarSkillDepotExcelConfigData.json`)
+			return
+		}
+		const getAvatarSkill = this.excel.getConfig("AvatarSkillExcelConfigData.json")
+		if (!getAvatarSkill) {
+			log.errorNoStack(`Error get AvatarSkillExcelConfigData.json`)
+			return
+		}
 		for (const data of Object.values(getAvatar)) {
 			if (data && data.nameTextMapHash) {
 				const id = data.id
 				const iconName = data.iconName
 
-				if (id < 10000002 || id >= 11000000) continue
+				//if (id < 10000002 || id >= 11000000) continue
+
+				// 10000005 = boy | 10000007 = girl
+
+				var depoData = Object.values(getAvatarSkillDepot).find((item) => item.id === data.skillDepotId)
+				if (!depoData) {
+					log.warn(`AvatarSkillDepot not found`, id)
+					continue
+				}
+				var e = depoData.energySkill
+				var skillData = Object.values(getAvatarSkill).find((item) => item.id === e)
+				if (!skillData) {
+					log.warn(`AvatarSkill not found`, id)
+					continue
+				}
+				var elementType = getElementType(skillData.costElemType)
+				/*
+				var bodyType = getBodyTypeNumber(data.bodyType)
+				if(bodyType === -1) {
+					log.warn(`Avatar bodyType not found`, id)
+				}
+				*/
 
 				const obj: ItemAvatar = {
 					type: 1, // 1=avatar
@@ -795,10 +919,12 @@ class GI {
 					id,
 					name: {},
 					desc: {},
+					desc2: {},
 					icon: "",
-					weaponType: data.weaponType,
-					qualityType: data.qualityType,
-					bodyType: data.bodyType
+					starType: getStar(data.qualityType.toString()),
+					weaponType: getWeaponTypeNumber(data.weaponType),
+					elementType,
+					bodyType: -1 // TODO: get better bodyType
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -809,7 +935,7 @@ class GI {
 				obj.icon = await General.downloadImageOrCopyLocal(
 					`${DUMP_GI}/${iconName}.png`, // local file dump (private)
 					`${FOLDER_GI}/icon/avatar/${iconName}.png`, // local file (public)
-					`${domainPublic}/resources/genshin-impact/icon/avatar/${iconName}.png`, // url public
+					`${domainPublic}/resources/${nameGame}/icon/avatar/${iconName}.png`, // url public
 					`https://enka.network/ui/${iconName}.png` // fallback url
 				)
 

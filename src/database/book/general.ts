@@ -156,7 +156,7 @@ export const _ = {
 		const existingDoc = await collection.findOne({ id, type })
 		return existingDoc !== null
 	},
-	itemAdd: async function (obj: ItemData, rebuild: boolean = false): Promise<boolean> {
+	itemAdd: async function (obj: ItemData, rebuild: boolean = false, replace: boolean = false): Promise<boolean> {
 		const { id, type } = obj
 
 		await DBMongo.isConnected()
@@ -168,27 +168,43 @@ export const _ = {
 		}
 
 		if (rebuild) {
-			// Force save using upsert: update if exists, insert if not.
-			const result = await collection.updateOne({ id, type }, { $set: obj }, { upsert: true })
-			// Log depending on whether the document was updated or inserted
-			if (result.upsertedId) {
-				//log.info(`A document was inserted with the _id: ${result.upsertedId}`)
-				return true
+			if (replace) {
+				// Fully replace the document: remove old fields not in `obj`
+				const result = await collection.replaceOne({ id, type }, obj, { upsert: true })
+
+				if (result.upsertedId) {
+					// log.info(`Inserted new document with _id: ${result.upsertedId}`);
+					return true
+				} else if (result.modifiedCount > 0) {
+					// log.info(`Replaced existing document with id: ${id}`);
+					return true
+				} else {
+					// log.info(`No changes made for document with id: ${id}`);
+					return true
+				}
 			} else {
-				//log.warn(`Existing document updated for id: ${id}`)
-				return true
+				// Partial update with $set (keeps other fields intact)
+				const result = await collection.updateOne({ id, type }, { $set: obj }, { upsert: true })
+
+				if (result.upsertedId) {
+					// log.info(`Inserted new document with _id: ${result.upsertedId}`);
+					return true
+				} else {
+					// log.info(`Updated existing document with id: ${id}`);
+					return true
+				}
 			}
 		} else {
-			// Check if document already exists; insert if not.
 			const existingDoc = await collection.findOne({ id, type })
 			if (existingDoc == null) {
 				const result = await collection.insertOne(obj)
-				//log.info(`A document was inserted with the _id: ${result.insertedId}`)
+				// log.info(`Inserted new document with _id: ${result.insertedId}`);
 				return true
 			} else {
 				log.warn("Already exist", id)
 			}
 		}
+
 		return false
 	},
 	addMultiLangNamesAsObject: function (

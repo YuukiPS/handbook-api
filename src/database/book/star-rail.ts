@@ -1,12 +1,21 @@
 import Logger from "@UT/logger"
-import { ClassAvatarExcelSR, ClassAvatarItemExcelSR, ItemAvatar } from "@UT/response"
-import { isEmpty } from "@UT/library"
+import {
+	ClassAvatarExcelSR,
+	ClassEquipmentExcelSR,
+	ClassItemExcelSR,
+	ItemAvatar,
+	ItemData,
+	ItemNormal,
+	ItemWeapon
+} from "@UT/response"
+import { isEmpty, sleep } from "@UT/library"
 import { domainPublic } from "@UT/share"
 import ExcelManager from "@UT/excel"
 // thrid party
 import { isMainThread } from "worker_threads"
 // datebase
 import General from "@DB/book/general"
+import path from "path"
 
 const nameGame = "star-rail"
 
@@ -19,42 +28,66 @@ export const FOLDER_SR = `./src/server/web/public/resources/${nameGame}`
 export const LANG_SR = ["CHS", "CHT", "DE", "EN", "ES", "FR", "ID", "JP", "KR", "PT", "RU", "TH", "VI"] // TODO: TH_0(GI)=TH(SR),TH_1
 export const EXCEL_SR = {
 	"AvatarConfig.json": ClassAvatarExcelSR,
-	"ItemConfigAvatar.json": ClassAvatarItemExcelSR // damm why hoyo put info avatar in item config
-	//"AvatarBaseType.json": ClassAvatarBaseTypeExcelSR,
-	//"MaterialExcelConfigData.json": ClassItemExcel,
-	//"HomeWorldFurnitureExcelConfigData.json": ClassItemExcel,
-	//"MonsterExcelConfigData.json": ClassMonsterExcel,
-	//"MonsterDescribeExcelConfigData.json": ClassMonsterNameExcel,
-	//"MonsterSpecialNameExcelConfigData.json": ClassMonsterNameSpecialExcel,
-	//"WeaponExcelConfigData.json": ClassWeaponExcel,
-	//"SceneExcelConfigData.json": ClassSceneExcel,
-	//"GadgetExcelConfigData.json": ClassGadgetExcel,
-	//"ManualTextMapConfigData.json": ClassManualTextMapExcel,
-	//"ReliquaryExcelConfigData.json": ClassReliquaryExcel,
-	//"ReliquaryMainPropExcelConfigData.json": ClassReliquaryMainPropExcel,
-	//"ReliquaryAffixExcelConfigData.json": ClassReliquaryAffixExcel,
-	//"ReliquaryLevelExcelConfigData.json": ClassReliquaryLevelExcel,
-	//"QuestExcelConfigData.json": ClassQuestExcel // TODO: maybe we need use yuuki res (because dim never update this or it is incomplete.)
-	//"ExcelBinOutput/AvatarCurveExcelConfigData.json": ItemReliquary,
+	"EquipmentConfig.json": ClassEquipmentExcelSR,
+	"ItemConfig.json": ClassItemExcelSR,
+	"ItemConfigAvatar.json": ClassItemExcelSR,
+	"ItemConfigAvatarPlayerIcon.json": ClassItemExcelSR,
+	"ItemConfigAvatarRank.json": ClassItemExcelSR,
+	"ItemConfigAvatarSkin.json": ClassItemExcelSR,
+	//"ItemConfigAvatarTest.json": ClassItemExcelSR,
+	//"ItemConfigAvatarTestRank.json": ClassItemExcelSR,
+	"ItemConfigBook.json": ClassItemExcelSR,
+	"ItemConfigDisk.json": ClassItemExcelSR,
+	"ItemConfigEquipment.json": ClassItemExcelSR, // > light cone class
+	"ItemConfigRelic.json": ClassItemExcelSR, // > Relic class
+	"ItemConfigTrainDynamic.json": ClassItemExcelSR
 } as const
 // file only in PC not in server (TODO: auto move file local to server)
 export const DUMP_SR = "../../../../Docker/SR/sr/SR_Resources/Tool/dump"
 
 // SR function
-function Calculate(name: string, finalValue: number): string {
-	if (
-		name.includes("PERCENT") ||
-		name.includes("CRITICAL") ||
-		name.includes("CHARGE") ||
-		name.includes("HURT") ||
-		name.includes("HEAL")
-	) {
-		return `${(finalValue * 100).toFixed(2)}%`
-	} else {
-		return `+${Math.floor(finalValue)}`
-	}
+enum ItemRarity {
+	Unknown = 0,
+	Normal = 1,
+	NotNormal = 2,
+	Rare = 3,
+	VeryRare = 4,
+	SuperRare = 5
 }
-
+function getStarSR(name: string): number {
+	return (ItemRarity as any)[name] ?? -1
+}
+enum AvatarBaseType {
+	Unknown = 0,
+	Warrior = 1,
+	Rogue = 2,
+	Mage = 3,
+	Shaman = 4,
+	Warlock = 5,
+	Knight = 6,
+	Priest = 7,
+	Memory = 8
+}
+// in SR AvatarBase just like weaponType in GI, its call light cone
+function getAvatarBase(name: string): number {
+	return (AvatarBaseType as any)[name] ?? -1
+}
+function getAvatarBaseNumber(id: number): string {
+	return AvatarBaseType[id] ?? "Unknown"
+}
+enum DamageType {
+	Physical = 1000111,
+	Fire = 1000112,
+	Ice = 1000113,
+	Thunder = 1000114,
+	Wind = 1000115,
+	Quantum = 1000116,
+	Imaginary = 1000117
+}
+// in SR DamageType just like elementType in GI, its call ???
+function getDamageType(name: string): number {
+	return (DamageType as any)[name] ?? -1
+}
 class SR {
 	private excel!: ExcelManager<typeof EXCEL_SR>
 	constructor() {
@@ -96,7 +129,7 @@ class SR {
 
 		log.info(`Building item data`)
 		//await this.runAvatar(foce_save)
-		//await this.runItem(foce_save)
+		await this.runItem(foce_save)
 		//await this.runMonster(foce_save)
 		//await this.runWeapon(foce_save)
 		//await this.runScene(foce_save)
@@ -685,36 +718,35 @@ class SR {
 			}
 		}
 	}
-
+*/
 	async runItem(rebuild: boolean): Promise<void> {
-		for (const [filePath, clazz] of Object.entries(EXCEL_GI)) {
-			if (clazz !== ClassItemExcel) continue
+		for (const [filePath, clazz] of Object.entries(EXCEL_SR)) {
+			if (clazz !== ClassItemExcelSR) continue
 
 			log.info(`Try to update ${filePath} data`)
-			const getItem = this.excel.getConfig(filePath as keyof typeof EXCEL_GI) as ClassItemExcel
+
+			const getItem = this.excel.getConfig(filePath as keyof typeof EXCEL_SR) as ClassItemExcelSR
 			if (!getItem) {
 				log.errorNoStack(`Error get ${filePath}`)
 				return
 			}
-
 			for (const data of Object.values(getItem)) {
-				if (data && data.nameTextMapHash) {
-					const id = data.id
-					const iconName = data.icon
+				if (data) {
+					const id = data.ID
+					const typeSub = data.ItemSubType
+					const iconPath = data.ItemIconPath.toLocaleLowerCase()
 
-					const obj: ItemNormal = {
-						type: 2, // 2=normal item
-						game: 1,
+					let obj: ItemNormal = {
+						type: 2,
+						game: 2,
 						id,
 						name: {},
 						desc: {},
+						desc2: {},
 						icon: "",
-						rankLevel: data.rankLevel,
-						itemType: data.itemType,
-						materialType: data.materialType,
-						foodQuality: data.foodQuality,
-						specialFurnitureType: data.specialFurnitureType,
-						surfaceType: data.surfaceType
+						starType: getStarSR(data.Rarity),
+						itemType: typeSub
+						// other
 					}
 
 					if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -722,33 +754,61 @@ class SR {
 						continue
 					}
 
-					obj.icon = await General.downloadImageOrCopyLocal(
-						`${DUMP_GI}/${iconName}.png`, // local file dump (private)
-						`${FOLDER_GI}/icon/item/${iconName}.png`, // local file (public)
-						`${domainPublic}/resources/${nameGame}/icon/item/${iconName}.png`, // url public
-						`https://enka.network/ui/${iconName}.png` // fallback url
-					)
+					if (!isEmpty(iconPath)) {
+						obj.icon = await General.downloadImageOrCopyLocal(
+							`${DUMP_SR}/${iconPath}`, // local file dump (private)
+							`${FOLDER_SR}/icon/item/${id}.png`, // local file (public)
+							`${domainPublic}/resources/${nameGame}/icon/item/${id}.png`, // url public
+							`` // TODO: find fallback url
+						)
+					}
 
 					// add name
-					obj.name = General.addMultiLangNamesAsObject(
-						data.nameTextMapHash.toString(),
-						LANG_GI,
-						FOLDER_GI,
-						obj.game
-					)
+					if (data.ItemName && !isEmpty(data.ItemName.Hash)) {
+						obj.name = General.addMultiLangNamesAsObject(
+							data.ItemName.Hash.toString(),
+							LANG_SR,
+							FOLDER_SR,
+							obj.game
+						)
+					} else {
+						log.warn(`skip item ${id} (${typeSub}) > ${filePath}`)
+						// TODO: Mission,TravelBrochurePaster,ChessRogueDiceSurface,Virtual,Gift,PlanetFesItem
+						continue
+					}
+
 					// add desc
-					obj.desc = General.addMultiLangNamesAsObject(
-						data.descTextMapHash.toString(),
-						LANG_GI,
-						FOLDER_GI,
-						obj.game
-					)
+					if (data.ItemBGDesc && !isEmpty(data.ItemBGDesc.Hash)) {
+						obj.desc = General.addMultiLangNamesAsObject(
+							data.ItemBGDesc.Hash.toString(),
+							LANG_SR,
+							FOLDER_SR,
+							obj.game
+						)
+					} else {
+						obj.desc = {
+							EN: `UNKD1-${id}`
+						}
+					}
+					// add desc2
+					if (data.ItemDesc && !isEmpty(data.ItemDesc.Hash)) {
+						obj.desc2 = General.addMultiLangNamesAsObject(
+							data.ItemDesc.Hash.toString(),
+							LANG_SR,
+							FOLDER_SR,
+							obj.game
+						)
+					} else {
+						obj.desc2 = {
+							EN: `UNKD2-${id}`
+						}
+					}
 
 					//log.info("item data:", obj)
 
 					// add to datebase
 					var isAdd = await General.itemAdd(obj, rebuild)
-					log.info(`Item add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
+					log.info(`Item add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} = db ${isAdd}`)
 
 					//await sleep(5)
 				} else {
@@ -757,7 +817,6 @@ class SR {
 			}
 		}
 	}
-        */
 
 	async runAvatar(rebuild: boolean): Promise<void> {
 		log.info(`Try to update Avatar data`)
@@ -774,21 +833,30 @@ class SR {
 		for (const data of Object.values(getAvatar)) {
 			if (data) {
 				const id = data.AvatarID
-				const iconName = data.AvatarSideIconPath.toLocaleLowerCase()
+				const iconPath = data.AvatarSideIconPath.toLocaleLowerCase()
 
+				var infoCard = Object.values(getAvatarItem).find((item) => item.ID === id)
+				if (!infoCard) {
+					log.warn(`Avatar card not found`, id)
+					continue
+				}
+
+				var wp = getAvatarBase(data.AvatarBaseType)
 				const obj: ItemAvatar = {
 					type: 1, // 1=avatar
 					game: 2,
 					id,
 					name: {},
 					desc: {},
+					desc2: {},
 					icon: "",
-					weaponType: data.DamageType,
-					qualityType: data.Rarity,
-					bodyType: data.AvatarBaseType
+					starType: getStarSR(infoCard.Rarity), // maybe just use star item instead of star avatar in infoAvatar (CombatPowerAvatarRarityType4)
+					weaponType: wp,
+					elementType: getDamageType(data.DamageType),
+					bodyType: -1 //isBoy ? 1 : 2 // TODO: get better bodytype
 				}
 
-				// bruh
+				// only main character
 				var isBoy = false
 				if (data.UIAvatarModelPath.includes("Boy")) {
 					isBoy = true
@@ -800,7 +868,7 @@ class SR {
 				}
 
 				obj.icon = await General.downloadImageOrCopyLocal(
-					`${DUMP_SR}/${iconName}`, // local file dump (private)
+					`${DUMP_SR}/${iconPath}`, // local file dump (private)
 					`${FOLDER_SR}/icon/avatar/${id}.png`, // local file (public)
 					`${domainPublic}/resources/${nameGame}/icon/avatar/${id}.png`, // url public
 					`https://enka.network/ui/hsr/SpriteOutput/AvatarRoundIcon/${id}.png` // fallback url
@@ -813,13 +881,12 @@ class SR {
 					FOLDER_SR,
 					obj.game,
 					"",
-					`${isBoy ? "Boy" : "Girl"} ${obj.weaponType}` // TODO: find NT name this
+					`${isBoy ? "Boy" : "Girl"} ${getAvatarBaseNumber(wp)}` // TODO: find NT name this
 				)
 				// add desc
-				var infoAvatar = Object.values(getAvatarItem).find((item) => item.ID === id)
-				if (infoAvatar && !isEmpty(infoAvatar.ItemBGDesc.Hash)) {
+				if (infoCard.ItemBGDesc && !isEmpty(infoCard.ItemBGDesc.Hash)) {
 					obj.desc = General.addMultiLangNamesAsObject(
-						infoAvatar.ItemBGDesc.Hash.toString(),
+						infoCard.ItemBGDesc.Hash.toString(),
 						LANG_SR,
 						FOLDER_SR,
 						obj.game

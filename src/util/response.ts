@@ -22,6 +22,11 @@ export interface PropRsp {
 	data: Prop | null
 }
 
+// Obj
+interface HashObject {
+	Hash: string
+}
+
 // Class (for mapping)
 export class ClassAvatarExcelGI {
 	[key: string]: AvatarExcelGI
@@ -35,15 +40,33 @@ export class ClassAvatarExcelSR {
 		Object.assign(this, data)
 	}
 }
-export class ClassAvatarItemExcelSR {
-	[key: string]: AvatarItemExcelSR
-	constructor(data: Record<string, AvatarItemExcelSR>) {
+export class ClassAvatarSkillExcelGI {
+	[key: string]: AvatarSkillExcelConfigDataGI
+	constructor(data: Record<string, AvatarSkillExcelConfigDataGI>) {
 		Object.assign(this, data)
 	}
 }
-export class ClassItemExcel {
-	[key: string]: ItemExcel
-	constructor(data: Record<string, ItemExcel>) {
+export class ClassAvatarSkillDepotExcelGI {
+	[key: string]: AvatarSkillDepotExcelConfigDataGI
+	constructor(data: Record<string, AvatarSkillDepotExcelConfigDataGI>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassEquipmentExcelSR {
+	[key: string]: EquipmentExcelSR
+	constructor(data: Record<string, EquipmentExcelSR>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassItemExcelGI {
+	[key: string]: ItemExcelGI
+	constructor(data: Record<string, ItemExcelGI>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassItemExcelSR {
+	[key: string]: ItemExcelSR
+	constructor(data: Record<string, ItemExcelSR>) {
 		Object.assign(this, data)
 	}
 }
@@ -184,13 +207,19 @@ export interface AvatarExcelGI {
 	id: number
 	nameTextMapHash: number
 	descTextMapHash: number
+	skillDepotId: number // > AvatarSkillDepotExcelConfigData (301) > AvatarSkillExcelConfigData (10034)
 	iconName: string
 	weaponType: string
 	qualityType: string
 	bodyType: string
 }
-interface HashObject {
-	Hash: string
+export interface AvatarSkillDepotExcelConfigDataGI {
+	id: number
+	energySkill: number
+}
+export interface AvatarSkillExcelConfigDataGI {
+	id: number
+	costElemType: string
 }
 export interface AvatarExcelSR {
 	AvatarID: number
@@ -205,10 +234,14 @@ export interface AvatarExcelSR {
 	Rarity: string
 	DamageType: string
 }
-export interface AvatarItemExcelSR {
-	ID: number
-	ItemName: HashObject
-	ItemBGDesc: HashObject
+export interface EquipmentExcelSR {
+	EquipmentID: number
+	EquipmentName: HashObject
+	ImagePath: string // ?
+	ThumbnailPath: string // thumb ?
+	AvatarBaseType: string
+	Rarity: string
+	MaxRank: number
 }
 export interface WeaponExcel {
 	id: number
@@ -238,7 +271,7 @@ export interface MonsterNameSpecialExcel {
 	specialNameID: number
 	specialNameTextMapHash: number
 }
-export interface ItemExcel {
+export interface ItemExcelGI {
 	id: number
 	nameTextMapHash: number
 	descTextMapHash: number
@@ -253,6 +286,16 @@ export interface ItemExcel {
 	specialFurnitureType: string
 	surfaceType: string
 }
+export interface ItemExcelSR {
+	ID: number
+	ItemMainType: string
+	ItemSubType: string
+	Rarity: string
+	ItemIconPath: string
+	ItemName: HashObject
+	ItemBGDesc: HashObject
+	ItemDesc: HashObject // show in ItemConfigEquipment
+}
 
 // In Datebase
 export interface BookRsp {
@@ -266,21 +309,23 @@ export interface ItemData {
 	game: number // 1=genshin, 2=starrail
 	name: Record<string, string> // name item
 	desc: Record<string, string> // desc item
+	desc2: Record<string, string> // desc item
 	icon: string // icon item
 }
 export interface ItemAvatar extends ItemData {
 	// always from type 1 for avatar
 	type: 1
 	// detail
-	weaponType?: string
-	qualityType?: string
-	bodyType?: string
+	weaponType?: number
+	elementType?: number
+	starType?: number
+	bodyType?: number
 }
 export interface ItemNormal extends ItemData {
 	// always from type 2 for normal item
 	type: 2
 	// detail
-	rankLevel?: number
+	starType?: number
 	itemType?: string
 	materialType?: string
 	foodQuality?: string
@@ -297,8 +342,8 @@ export interface ItemWeapon extends ItemData {
 	// always from type 4 for weapon
 	type: 4
 	// detail
-	weaponType?: string
-	rankLevel?: number
+	weaponType?: number
+	starType?: number
 }
 export interface ItemScene extends ItemData {
 	// always from type 5 for scene
