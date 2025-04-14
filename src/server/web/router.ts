@@ -7,10 +7,11 @@ r.all("/", (req: Request, res: Response) => {
 })
 
 r.all("/item", async (req: Request, res: Response) => {
-	const { search, page, lang } = req.query
+	const { search, game, page, lang } = req.query
 	var result = await DB.getItem({
 		search: search as string,
-		page: page as unknown as number,
+		page: parseInt(page as string) || 1,
+		game: parseInt(game as string) || 0,
 		lang: lang as string,
 		limit: 10 // tmp lock 10 items
 	})

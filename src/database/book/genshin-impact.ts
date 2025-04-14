@@ -1,6 +1,6 @@
 import Logger from "@UT/logger"
 import {
-	ClassAvatarExcel,
+	ClassAvatarExcelGI,
 	ClassGadgetExcel,
 	ClassItemExcel,
 	ClassManualTextMapExcel,
@@ -33,13 +33,15 @@ import { isMainThread } from "worker_threads"
 // datebase
 import General from "@DB/book/general"
 
-const log = new Logger("Update")
+const log = new Logger("GenshinImpact")
 
 export const REPO_GI = "Dimbreath/AnimeGameData"
+export const REPO_BRANCH_GI = "master"
+export const PATHBIN_GI = `ExcelBinOutput`
 export const FOLDER_GI = "./src/server/web/public/resources/genshin-impact"
 export const LANG_GI = ["CHS", "CHT", "DE", "EN", "ES", "FR", "ID", "IT", "JP", "KR", "PT", "RU", "TR", "VI"] // TODO: TH_0,TH_1
 export const EXCEL_GI = {
-	"AvatarExcelConfigData.json": ClassAvatarExcel,
+	"AvatarExcelConfigData.json": ClassAvatarExcelGI,
 	"MaterialExcelConfigData.json": ClassItemExcel,
 	"HomeWorldFurnitureExcelConfigData.json": ClassItemExcel,
 	"MonsterExcelConfigData.json": ClassMonsterExcel,
@@ -84,37 +86,40 @@ class GI {
 		}
 	}
 
-	public async Update() {
+	public async Update(skip_update: boolean = false, foce_save: boolean = false, dont_build: boolean = false): Promise<void> {
 		log.info(`Try to update Genshin Impact resources`)
 
-		// TODO: move to config
-		let demo = true
-		let rebuild = false
-
-		if (!(await General.checkGit(REPO_GI, "commit_gi", demo))) {
-			log.info(`No update available`)
-			return
+		var skip_dl = true;
+		if (await General.checkGit(REPO_GI, "commit_gi", skip_update)) {
+			log.info(`Update available`)
+			skip_dl = false
+		}else{
+			log.info(`No update available: ${REPO_GI} > skip? ${skip_update}`)
 		}
-		log.info(`Update available`)
 
 		log.info(`Downloading localization files`)
 		for (const lang of LANG_GI) {
-			await General.downloadGit(REPO_GI, FOLDER_GI, `TextMap/TextMap${lang}.json`, demo)
+			await General.downloadGit(REPO_GI, FOLDER_GI, `TextMap/TextMap${lang}.json`, skip_dl, REPO_BRANCH_GI)
 		}
 
 		log.info(`Downloading Excel files`)
-		this.excel = new ExcelManager(REPO_GI, FOLDER_GI, EXCEL_GI, demo)
+		this.excel = new ExcelManager(REPO_GI, FOLDER_GI, EXCEL_GI, skip_dl, REPO_BRANCH_GI, PATHBIN_GI)
 		await this.excel.loadFiles()
 
+		if(dont_build){
+			log.info(`Skip build item data`)
+			return
+		}
+
 		log.info(`Building item data`)
-		await this.runAvatar(rebuild)
-		await this.runItem(rebuild)
-		await this.runMonster(rebuild)
-		await this.runWeapon(rebuild)
-		await this.runScene(rebuild)
-		await this.runGadget(rebuild)
-		await this.runReliquary(rebuild)
-		await this.runQuest(rebuild)
+		await this.runAvatar(foce_save)
+		await this.runItem(foce_save)
+		await this.runMonster(foce_save)
+		await this.runWeapon(foce_save)
+		await this.runScene(foce_save)
+		await this.runGadget(foce_save)
+		await this.runReliquary(foce_save)
+		await this.runQuest(foce_save)
 	}
 
 	async runQuest(rebuild: boolean): Promise<void> {

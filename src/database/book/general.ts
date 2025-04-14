@@ -48,8 +48,10 @@ export const _ = {
 			}
 
 			// Optional filters
-			if (typeof type === "number") query.type = type
-			if (typeof game === "number") query.game = game
+			if (!isEmpty(type)) query.type = type
+			if (!isEmpty(game)) query.game = game
+
+			log.info(`query:`, query)
 
 			// Pagination
 			const skip = (page - 1) * limit
@@ -184,17 +186,18 @@ export const _ = {
 				//log.info(`A document was inserted with the _id: ${result.insertedId}`)
 				return true
 			} else {
-				log.warn("Already exist", id)				
+				log.warn("Already exist", id)
 			}
 		}
-		return false;
+		return false
 	},
 	addMultiLangNamesAsObject: function (
 		hash: string,
 		langList: string[],
 		folderPath: string = "",
 		type: number = 0, // 1=genshin, 2=starrail
-		custumName: string = ""
+		custumName1: string = "",
+		custumName2: string = ""
 	): Record<string, string> {
 		const names: Record<string, string> = {}
 		// || `UNK-${hash}`
@@ -206,10 +209,11 @@ export const _ = {
 				//log.errorNoStack("not found", hash, lang)
 				continue
 			}
-			names[lang] = isValid+custumName
+			isValid = isValid.replace("{NICKNAME}", `Trailblazer ${custumName2}`) // Mod SR
+			names[lang] = isValid + custumName1
 		}
 		if (Object.keys(names).length == 0) {
-			names["EN"] = custumName || `UNK-${hash}`
+			names["EN"] = custumName1 || `UNK-${hash}`
 		}
 		return names
 	},
@@ -262,9 +266,10 @@ export const _ = {
 		repoName: string,
 		repoFolder: string,
 		file: string = "TextMap/TextMapEN.json",
-		skip: boolean = false
+		skip: boolean = false,
+		branch: string = "master"
 	): Promise<string> {
-		const urlDL = `https://gitlab.com/${repoName}/-/raw/master/${file}`
+		const urlDL = `https://gitlab.com/${repoName}/-/raw/${branch}/${file}`
 		const savePath = `${repoFolder}/${file}`
 		if (skip) {
 			const fileExists = await fs
@@ -291,7 +296,7 @@ export const _ = {
 	checkGit: async function (name: string, saveDB: string, skip: boolean = false): Promise<boolean> {
 		if (skip) {
 			log.info(`Skip checking Git: ${name} > ${saveDB}`)
-			return true
+			return false
 		}
 		const urlCheck = `https://gitlab.com/api/v4/projects/${encodeURIComponent(name)}/repository/commits?per_page=1`
 		try {
@@ -304,6 +309,7 @@ export const _ = {
 			if (getLast.data != null) {
 				if (latestCommit.id !== getLast.data.value) {
 					log.info("New update is available!")
+					// TODO: send notification to user
 					this.updateProp(saveDB, latestCommit.id, "update")
 					return true
 				} else {

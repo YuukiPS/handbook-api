@@ -32,15 +32,36 @@ export function sleep(ms: number) {
 	})
 }
 
-export function isEmpty(value: string | number | any[] | undefined): boolean {
-	return (
-		value === undefined ||
-		value === null ||
-		value === "" ||
-		value === "undefined" ||
-		(Array.isArray(value) && value.length === 0) ||
-		(typeof value === "number" && value === 0)
-	)
+export function isEmpty(value: string | number | any[] | object | undefined): boolean {
+	// Check for undefined or null first.
+	if (value === undefined || value === null) return true
+
+	// Process strings: trim whitespace and check for empty string or special values.
+	if (typeof value === "string") {
+		const trimmed = value.trim()
+		return trimmed === "" || trimmed.toLowerCase() === "undefined" || trimmed.toLowerCase() === "nan"
+	}
+
+	// Process numbers: check if the number is NaN or equals 0.
+	if (typeof value === "number") {
+		return Number.isNaN(value) || value === 0
+	}
+
+	// Process arrays: empty if the length is 0.
+	if (Array.isArray(value)) {
+		return value.length === 0
+	}
+
+	// Process plain objects: check if it has no own properties.
+	// Note: This check will classify objects such as dates, functions, or custom class instances
+	// as non-empty, because they have their own prototype structure.
+	if (typeof value === "object") {
+		// Exclude arrays (already handled) and perhaps other special objects if needed.
+		return Object.keys(value).length === 0
+	}
+
+	// Return false if none of the conditions above are met.
+	return false
 }
 
 export function getTimeV2(use_utc = false, minutesToAdd = 0, zone_time = 8): number {
@@ -221,7 +242,8 @@ export async function DownloadFile(link: string, fileFullPath: string, maxRetrie
 export async function readJsonFileAsync<T = unknown>(filePath: string): Promise<T> {
 	try {
 		const fileContent: string = await fs.readFile(filePath, "utf-8")
-		return JSON.parse(fileContent)
+		const modifiedContent = fileContent.replace(/("Hash":\s*)(\d+)/g, '$1"$2"') // MOD SR: fix hash long number 64
+		return JSON.parse(modifiedContent)
 	} catch (error) {
 		console.error(`Error reading JSON file at ${filePath}:`, error)
 		throw error

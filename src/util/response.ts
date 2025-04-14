@@ -23,9 +23,21 @@ export interface PropRsp {
 }
 
 // Class (for mapping)
-export class ClassAvatarExcel {
-	[key: string]: AvatarExcel
-	constructor(data: Record<string, AvatarExcel>) {
+export class ClassAvatarExcelGI {
+	[key: string]: AvatarExcelGI
+	constructor(data: Record<string, AvatarExcelGI>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassAvatarExcelSR {
+	[key: string]: AvatarExcelSR
+	constructor(data: Record<string, AvatarExcelSR>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassAvatarItemExcelSR {
+	[key: string]: AvatarItemExcelSR
+	constructor(data: Record<string, AvatarItemExcelSR>) {
 		Object.assign(this, data)
 	}
 }
@@ -168,7 +180,7 @@ export interface SceneExcel {
 	levelEntityConfig: string
 	type: string
 }
-export interface AvatarExcel {
+export interface AvatarExcelGI {
 	id: number
 	nameTextMapHash: number
 	descTextMapHash: number
@@ -176,6 +188,27 @@ export interface AvatarExcel {
 	weaponType: string
 	qualityType: string
 	bodyType: string
+}
+interface HashObject {
+	Hash: string
+}
+export interface AvatarExcelSR {
+	AvatarID: number
+	AvatarName: HashObject
+	//AvatarFullName: HashObject
+	//AvatarCutinIntroText: HashObject
+	DefaultAvatarHeadIconPath: string // normal icon
+	AvatarSideIconPath: string // side ? (most use enka)
+	SideAvatarHeadIconPath: string // team (mini icon) ?
+	UIAvatarModelPath: string // model boy or girl
+	AvatarBaseType: string
+	Rarity: string
+	DamageType: string
+}
+export interface AvatarItemExcelSR {
+	ID: number
+	ItemName: HashObject
+	ItemBGDesc: HashObject
 }
 export interface WeaponExcel {
 	id: number
@@ -306,8 +339,8 @@ export interface ItemQuest extends ItemData {
 	// detail
 	//mainId?: number
 	subId?: number
-	stepDesc?: Record<string, string> 
-	guideTips?: Record<string, string> 
+	stepDesc?: Record<string, string>
+	guideTips?: Record<string, string>
 	showType?: string
 	order?: number
 }

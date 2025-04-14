@@ -9,17 +9,22 @@ export default class ExcelManager<T extends { [key: string]: new (data: Record<s
 	// Create an internal storage object using a mapped type from T.
 	private configs: Partial<{ [K in keyof T]: InstanceType<T[K]> }> = {}
 
-	constructor(private repo: string, private folder: string, private fileMap: T, private skip: boolean = false) {}
+	constructor(
+		private repo: string,
+		private folder: string,
+		private fileMap: T,
+		private skip: boolean = false,
+		private branch: string = "master",
+		private pathBin: string = "ExcelBinOutput"
+	) {}
 
 	// Loads all files defined in fileMap.
 	async loadFiles(): Promise<void> {
 		// Get an array of file names from fileMap's keys.
 		const fileKeys = Object.keys(this.fileMap) as (keyof T)[]
 		for (const filePath of fileKeys) {
-			// Note: if your keys in CONFIG_FILES don't include the "ExcelBinOutput/" prefix,
-			// you can add it here if needed.
-			const fullPath = `ExcelBinOutput/${filePath as string}`
-			const savePath = await General.downloadGit(this.repo, this.folder, fullPath, this.skip)
+			const fullPath = `${this.pathBin}/${filePath as string}`
+			const savePath = await General.downloadGit(this.repo, this.folder, fullPath, this.skip, this.branch)
 			if (savePath === "") {
 				log.errorNoStack(`Error downloading file: ${fullPath}`)
 				continue
