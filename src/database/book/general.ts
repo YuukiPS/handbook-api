@@ -105,6 +105,26 @@ export const _ = {
 									}
 								}
 							}
+						},
+						desc2: {
+							$cond: {
+								if: { $ifNull: [`$desc2.${lang}`, false] },
+								then: `$desc2.${lang}`,
+								else: {
+									$cond: {
+										if: { $ifNull: [`$desc2.EN`, false] },
+										then: `$desc2.EN`,
+										else: {
+											$let: {
+												vars: {
+													firstKeyValue: { $arrayElemAt: [{ $objectToArray: "$desc2" }, 0] }
+												},
+												in: "$$firstKeyValue.v"
+											}
+										}
+									}
+								}
+							}
 						}
 					}
 				},
@@ -228,8 +248,8 @@ export const _ = {
 			isValid = isValid.replace("{NICKNAME}", `Trailblazer ${custumName2}`) // Mod SR
 			names[lang] = isValid + custumName1
 		}
-		if (Object.keys(names).length == 0) {
-			names["EN"] = custumName1 || `UNK-${hash}`
+		if (!isEmpty(custumName1) && Object.keys(names).length == 0) {
+			names["EN"] = custumName1 //|| `UNK-${hash}`
 		}
 		return names
 	},

@@ -26,6 +26,13 @@ export interface PropRsp {
 interface HashObject {
 	Hash: string
 }
+interface StageConfigData {
+	HEIKKHLKMOA: string // field name
+	MBMDOCJIMEJ: string // value
+}
+interface MonsterData {
+	[key: string]: number
+}
 
 // Class (for mapping)
 export class ClassAvatarExcelGI {
@@ -70,21 +77,33 @@ export class ClassItemExcelSR {
 		Object.assign(this, data)
 	}
 }
-export class ClassMonsterExcel {
-	[key: string]: MonsterExcel
-	constructor(data: Record<string, MonsterExcel>) {
+export class ClassMonsterExcelGI {
+	[key: string]: MonsterExcelGI
+	constructor(data: Record<string, MonsterExcelGI>) {
 		Object.assign(this, data)
 	}
 }
-export class ClassMonsterNameExcel {
-	[key: string]: MonsterNameExcel
-	constructor(data: Record<string, MonsterNameExcel>) {
+export class ClassMonsterNameExcelGI {
+	[key: string]: MonsterNameExcelGI
+	constructor(data: Record<string, MonsterNameExcelGI>) {
 		Object.assign(this, data)
 	}
 }
-export class ClassMonsterNameSpecialExcel {
-	[key: string]: MonsterNameSpecialExcel
-	constructor(data: Record<string, MonsterNameSpecialExcel>) {
+export class ClassMonsterNameSpecialExcelGI {
+	[key: string]: MonsterNameSpecialExcelGI
+	constructor(data: Record<string, MonsterNameSpecialExcelGI>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassMonsterExcelSR {
+	[key: string]: MonsterExcelSR
+	constructor(data: Record<string, MonsterExcelSR>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassMonsterTemplateExcelSR {
+	[key: string]: MonsterTemplateExcelSR
+	constructor(data: Record<string, MonsterTemplateExcelSR>) {
 		Object.assign(this, data)
 	}
 }
@@ -94,9 +113,21 @@ export class ClassWeaponExcel {
 		Object.assign(this, data)
 	}
 }
-export class ClassSceneExcel {
-	[key: string]: SceneExcel
-	constructor(data: Record<string, SceneExcel>) {
+export class ClassSceneExcelGI {
+	[key: string]: SceneExcelGI
+	constructor(data: Record<string, SceneExcelGI>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassMazePlaneExcelSR {
+	[key: string]: MazePlaneExcelSR
+	constructor(data: Record<string, MazePlaneExcelSR>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassStageConfigExcelSR {
+	[key: string]: StageConfigExcelSR
+	constructor(data: Record<string, StageConfigExcelSR>) {
 		Object.assign(this, data)
 	}
 }
@@ -197,11 +228,30 @@ export interface QuestExcel {
 	failCondComb: string // > showType
 	failParent: string // > descTextMapHash
 }
-export interface SceneExcel {
+export interface SceneExcelGI {
 	id: number
 	scriptData: string
 	levelEntityConfig: string
 	type: string
+}
+export interface MazePlaneExcelSR {
+	PlaneID: number
+	WorldID: number
+	PlaneName: HashObject
+	PlaneType: string
+	StartFloorID: number
+	FloorIDList: number[]
+}
+export interface StageConfigExcelSR {
+	StageID: number
+	StageName: HashObject
+	StageType: string
+	Level: number
+	//EliteGroup: number
+	// maybe useful for auto LC
+	StageAbilityConfig: string[]
+	StageConfigData: StageConfigData
+	MonsterList: MonsterData
 }
 export interface AvatarExcelGI {
 	id: number
@@ -250,7 +300,7 @@ export interface WeaponExcel {
 	weaponType: string
 	rankLevel: number
 }
-export interface MonsterExcel {
+export interface MonsterExcelGI {
 	id: number
 	nameTextMapHash: number
 	monsterName: string
@@ -259,17 +309,34 @@ export interface MonsterExcel {
 	LODPatternName: string
 	iconName: string
 }
-export interface MonsterNameExcel {
+export interface MonsterNameExcelGI {
 	icon: string
 	nameTextMapHash: number
 	id: number
 	specialNameLabID: number
 	titleID: number
 }
-export interface MonsterNameSpecialExcel {
+export interface MonsterNameSpecialExcelGI {
 	specialNameLabID: number
 	specialNameID: number
 	specialNameTextMapHash: number
+}
+export interface MonsterExcelSR {
+	MonsterID: number
+	MonsterTemplateID: number
+	MonsterName: HashObject
+	MonsterIntroduction: HashObject
+	StanceWeakList: string[] // monster weakness to elements ?
+	// idk if useful for fiter
+	HardLevelGroup: number
+	EliteGroup: number
+}
+export interface MonsterTemplateExcelSR {
+	MonsterTemplateID: number
+	TemplateGroupID: number
+	Rank: string
+	RoundIconPath: string // small icon
+	IconPath: string // big icon ?
 }
 export interface ItemExcelGI {
 	id: number
@@ -388,4 +455,20 @@ export interface ItemQuest extends ItemData {
 	guideTips?: Record<string, string>
 	showType?: string
 	order?: number
+}
+export interface ItemPlane extends ItemData {
+	// always from type 11 for plane
+	type: 11
+	// detail
+	worldId?: number
+	planeType?: string
+	startFloorId?: number
+	floorIdList?: number[]
+}
+export interface ItemStage extends ItemData {
+	// always from type 12 for stage
+	type: 12
+	// detail
+	stageType?: string
+	stageLevel?: number
 }

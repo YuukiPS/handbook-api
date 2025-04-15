@@ -3,9 +3,16 @@ import {
 	ClassAvatarExcelSR,
 	ClassEquipmentExcelSR,
 	ClassItemExcelSR,
+	ClassMazePlaneExcelSR,
+	ClassMonsterExcelSR,
+	ClassMonsterTemplateExcelSR,
+	ClassStageConfigExcelSR,
 	ItemAvatar,
 	ItemData,
+	ItemMonster,
 	ItemNormal,
+	ItemPlane,
+	ItemStage,
 	ItemWeapon
 } from "@UT/response"
 import { isEmpty, sleep } from "@UT/library"
@@ -16,6 +23,7 @@ import { isMainThread } from "worker_threads"
 // datebase
 import General from "@DB/book/general"
 import path from "path"
+import { count } from "console"
 
 const nameGame = "star-rail"
 
@@ -29,6 +37,10 @@ export const LANG_SR = ["CHS", "CHT", "DE", "EN", "ES", "FR", "ID", "JP", "KR", 
 export const EXCEL_SR = {
 	"AvatarConfig.json": ClassAvatarExcelSR,
 	"EquipmentConfig.json": ClassEquipmentExcelSR,
+	"MonsterConfig.json": ClassMonsterExcelSR, // info basic monster
+	"MonsterTemplateConfig.json": ClassMonsterTemplateExcelSR, // get icon monster
+	"MazePlane.json": ClassMazePlaneExcelSR, // This is different from scenes like in GI because they have floor id so they have to be made into different classes
+	"StageConfig.json": ClassStageConfigExcelSR, // This scene in SR but for battle
 	"ItemConfig.json": ClassItemExcelSR,
 	"ItemConfigAvatar.json": ClassItemExcelSR,
 	"ItemConfigAvatarPlayerIcon.json": ClassItemExcelSR,
@@ -129,10 +141,11 @@ class SR {
 
 		log.info(`Building item data`)
 		//await this.runAvatar(foce_save)
-		await this.runItem(foce_save)
+		//await this.runItem(foce_save)
 		//await this.runMonster(foce_save)
 		//await this.runWeapon(foce_save)
-		//await this.runScene(foce_save)
+		//await this.runPlane(foce_save)
+        await this.runStage(foce_save)
 		//await this.runGadget(foce_save)
 		//await this.runReliquary(foce_save)
 		//await this.runQuest(foce_save)
@@ -479,44 +492,106 @@ class SR {
 			}
 		}
 	}
+*/
 
-	async runScene(rebuild: boolean): Promise<void> {
-		const getScene = this.excel.getConfig("SceneExcelConfigData.json")
-		if (!getScene) {
-			log.errorNoStack(`Error get SceneExcelConfigData.json`)
+	async runStage(rebuild: boolean): Promise<void> {
+		const getStage = this.excel.getConfig("StageConfig.json")
+		if (!getStage) {
+			log.errorNoStack(`Error get StageConfig.json`)
 			return
 		}
-		for (const data of Object.values(getScene)) {
-			if (data && data.id) {
-				const id = data.id
 
-				const obj: ItemScene = {
-					type: 5, // 5=scene
-					game: 1,
+		// Stage
+		for (const data of Object.values(getStage)) {
+			if (data) {
+				const id = data.StageID
+				const nameStage = data.StageName.Hash
+				const typeStage = data.StageType
+
+				const obj: ItemStage = {
+					type: 12, // 12=Stage for SR
+					game: 2,
 					id,
 					name: {},
 					desc: {},
-					icon: "", // TODO: add icon
-					typeScene: data.type
+					desc2: {},
+					icon: "",
+                    // other
+					stageType: typeStage,
+                    stageLevel: data.Level,					
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
-					log.info(`Scene already exists, skipping ${obj.id} (${obj.type})`)
+					log.info(`Stage already exists, skipping ${obj.id} (${obj.type})`)
 					continue
 				}
 
 				// add name
-				const name =
-					`${data.scriptData}` + (data.levelEntityConfig == "" ? "" : " (" + data.levelEntityConfig + ")")
-				obj.name = {
-					EN: name
-				}
+                /*
+                TODO: get better info
+                ChallengeGroupConfig (Moc)
+                ChallengeStoryGroupConfig (Pure Fiction Enemies)
+                ChallengeBossGroupConfig (Apocalytic Shadow Enemies)
+                */
+				obj.name = General.addMultiLangNamesAsObject(nameStage.toString(), LANG_SR, FOLDER_SR, obj.game, ` (${typeStage}) (L${data.Level})`)
 
-				//log.info("scene data:", obj)
+				//log.info("stage data:", obj)
 
 				// add to datebase
 				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Scene add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
+				log.info(`Scene add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} = db ${isAdd}`)
+
+				//await sleep(5)
+			} else {
+				log.info("skip", data)
+			}
+		}
+	}
+
+	async runPlane(rebuild: boolean): Promise<void> {
+		const getPlane = this.excel.getConfig("MazePlane.json")
+		if (!getPlane) {
+			log.errorNoStack(`Error get MazePlane.json`)
+			return
+		}
+
+		// World Scene
+		for (const data of Object.values(getPlane)) {
+			if (data) {
+				const id = data.PlaneID
+				const namePlane = data.PlaneName.Hash
+				const typePlane = data.PlaneType
+
+				if (!["Train", "Town", "Maze"].includes(typePlane)) continue
+
+				const obj: ItemPlane = {
+					type: 11, // 11=Plane for SR
+					game: 2,
+					id,
+					name: {},
+					desc: {},
+					desc2: {},
+					icon: "",					
+					// other
+                    planeType: typePlane,
+					worldId: data.WorldID,
+					startFloorId: data.StartFloorID,
+					floorIdList: data.FloorIDList
+				}
+
+				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+					log.info(`Plane already exists, skipping ${obj.id} (${obj.type})`)
+					continue
+				}
+
+				// add name
+				obj.name = General.addMultiLangNamesAsObject(namePlane.toString(), LANG_SR, FOLDER_SR, obj.game)
+
+				//log.info("plane data:", obj)
+
+				// add to datebase
+				var isAdd = await General.itemAdd(obj, rebuild)
+				log.info(`Plane add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} = db ${isAdd}`)
 
 				//await sleep(5)
 			} else {
@@ -526,26 +601,43 @@ class SR {
 	}
 
 	async runWeapon(rebuild: boolean): Promise<void> {
-		const getWeapon = this.excel.getConfig("WeaponExcelConfigData.json")
+		const getWeapon = this.excel.getConfig("EquipmentConfig.json")
 		if (!getWeapon) {
-			log.errorNoStack(`Error get WeaponExcelConfigData.json`)
+			log.errorNoStack(`Error get EquipmentConfig.json`)
+			return
+		}
+		const getEquipmentItem = this.excel.getConfig("ItemConfigEquipment.json")
+		if (!getEquipmentItem) {
+			log.errorNoStack(`Error get ItemConfigEquipment.json`)
 			return
 		}
 		for (const data of Object.values(getWeapon)) {
-			if (data && data.nameTextMapHash) {
-				const hash = data.nameTextMapHash
-				const id = data.id
-				const iconName = data.icon
+			if (data) {
+				const id = data.EquipmentID
+
+				// Config
+				var infoItem = Object.values(getEquipmentItem).find((item) => item.ID === id)
+				if (!infoItem) {
+					log.warn(`Weapon not found: `, id)
+					continue
+				}
+
+				const hash1 = data.EquipmentName.Hash
+				const hash2 = infoItem.ItemBGDesc.Hash
+				const hash3 = infoItem.ItemDesc.Hash
+				const iconPath = infoItem.ItemIconPath.toLocaleLowerCase()
 
 				const obj: ItemWeapon = {
 					type: 4, // 4=weapon
-					game: 1,
+					game: 2,
 					id,
 					name: {},
 					desc: {},
+					desc2: {},
 					icon: "",
-					weaponType: data.weaponType,
-					rankLevel: data.rankLevel
+                    // other
+					starType: getStarSR(infoItem.Rarity), // get star from item not weapon ?
+					weaponType: getAvatarBase(data.AvatarBaseType)					
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -554,22 +646,27 @@ class SR {
 				}
 
 				obj.icon = await General.downloadImageOrCopyLocal(
-					`${DUMP_GI}/${iconName}.png`, // local file dump (private)
-					`${FOLDER_GI}/icon/weapon/${iconName}.png`, // local file (public)
-					`${domainPublic}/resources/${nameGame}/icon/weapon/${iconName}.png`, // url public
-					`https://feixiaoqiu.com/static/images/weapon/${iconName}.png` // fallback url
+					`${DUMP_SR}/${iconPath}`, // local file dump (private)
+					`${FOLDER_SR}/icon/weapon/${id}.png`, // local file (public)
+					`${domainPublic}/resources/${nameGame}/icon/weapon/${id}.png`, // url public
+					`https://api.hakush.in/hsr/UI/lightconemediumicon/${id}.webp` // TODO: find fallback url
 				)
+				// https://sr.yatta.moe/hsr/assets/UI//equipment/medium/${id}.png
 
 				// add name
-				obj.name = General.addMultiLangNamesAsObject(hash.toString(), LANG_GI, FOLDER_GI, obj.game)
+				obj.name = General.addMultiLangNamesAsObject(hash1.toString(), LANG_SR, FOLDER_SR, obj.game)
+				// add desc
+				obj.desc = General.addMultiLangNamesAsObject(hash2.toString(), LANG_SR, FOLDER_SR, obj.game)
+				// add desc2
+				obj.desc2 = General.addMultiLangNamesAsObject(hash3.toString(), LANG_SR, FOLDER_SR, obj.game)
 
 				//log.info("weapon data:", obj)
 
 				// add to datebase
 				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Weapon add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
+				log.info(`Weapon add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} = db ${isAdd}`)
 
-				//await sleep(5)
+				await sleep(5)
 			} else {
 				log.info("skip", data)
 			}
@@ -577,40 +674,43 @@ class SR {
 	}
 
 	async runMonster(rebuild: boolean): Promise<void> {
-		const getMonsterData = this.excel.getConfig("MonsterExcelConfigData.json")
-		if (!getMonsterData) {
-			log.errorNoStack(`Error get MonsterExcelConfigData.json`)
+		const getMonsterConfig = this.excel.getConfig("MonsterConfig.json")
+		if (!getMonsterConfig) {
+			log.errorNoStack(`Error get MonsterConfig.json`)
 			return
 		}
-		const getMonsterNama = this.excel.getConfig("MonsterDescribeExcelConfigData.json")
-		if (!getMonsterNama) {
-			log.errorNoStack(`Error get MonsterDescribeExcelConfigData.json`)
-			return
-		}
-		const getMonsterNameSpecialExcel = this.excel.getConfig("MonsterSpecialNameExcelConfigData.json")
-		if (!getMonsterNameSpecialExcel) {
-			log.errorNoStack(`Error get MonsterSpecialNameExcelConfigData.json`)
+		const getMonsterTemplate = this.excel.getConfig("MonsterTemplateConfig.json")
+		if (!getMonsterTemplate) {
+			log.errorNoStack(`Error get MonsterTemplateConfig.json`)
 			return
 		}
 
-		for (const data of Object.values(getMonsterData)) {
-			if (data && data.nameTextMapHash) {
-				var hashName1 = data.nameTextMapHash
-				const id = data.id
+		for (const data of Object.values(getMonsterTemplate)) {
+			if (data) {
+				const id = data.MonsterTemplateID
 
-				//if (id != 26230301) continue // demo only
+				// Config
+				var infoMonster = Object.values(getMonsterConfig).find(
+					(item) => item.MonsterTemplateID === data.MonsterTemplateID
+				)
+				if (!infoMonster) {
+					log.warn(`Monster not found: `, id)
+					continue
+				}
 
-				const mName = data.monsterName
-				const varDP = data.describeId
+				var hashName = infoMonster.MonsterName.Hash
+				var hashInfo = infoMonster.MonsterIntroduction.Hash
 
 				const obj: ItemMonster = {
 					type: 3, // 3=monster
-					game: 1,
+					game: 2,
 					id,
 					name: {},
 					desc: {},
+					desc2: {},
 					icon: "",
-					typeMonster: data.type
+                    // other
+					typeMonster: data.Rank
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -618,99 +718,27 @@ class SR {
 					continue
 				}
 
-				var iconPath = ""
-				var hashName2 = 0
-				var hashName3 = 0
-
-				// find via describe Id
-				var infoMonster1 = Object.values(getMonsterNama).find((item) => item.id === Number(varDP))
-				if (infoMonster1) {
-					iconPath = infoMonster1.icon
-					hashName2 = infoMonster1.nameTextMapHash
-					//log.info("found monster0-1", infoMonster1)
-
-					var infoMonsterNameSpecial1 = Object.values(getMonsterNameSpecialExcel).find(
-						(item) => item.specialNameLabID === infoMonster1?.specialNameLabID
-					)
-
-					if (infoMonsterNameSpecial1) {
-						hashName3 = infoMonsterNameSpecial1.specialNameTextMapHash
-						//log.info("found monster0-2", infoMonsterNameSpecial1)
-					}
-				}
-
-				// find via icon monster name
-				var infoMonster2 = Object.values(getMonsterNama).find((item) => item.icon.includes(mName))
-				if (infoMonster2) {
-					iconPath = infoMonster2.icon
-					hashName2 = infoMonster2.nameTextMapHash
-					//log.info("found monster1-1", infoMonster2)
-
-					var infoMonsterNameSpecial2 = Object.values(getMonsterNameSpecialExcel).find(
-						(item) => item.specialNameLabID === infoMonster2?.specialNameLabID
-					)
-
-					if (infoMonsterNameSpecial2) {
-						hashName3 = infoMonsterNameSpecial2.specialNameTextMapHash
-						//log.info("found monster1-2", infoMonsterNameSpecial2)
-					}
-				}
+				const iconPath = data.RoundIconPath.toLocaleLowerCase()
 
 				if (!isEmpty(iconPath)) {
 					obj.icon = await General.downloadImageOrCopyLocal(
-						`${DUMP_GI}/${iconPath}.png`, // local file dump (private)
-						`${FOLDER_GI}/icon/monster/${iconPath}.png`, // local file (public)
-						`${domainPublic}/resources/${nameGame}/icon/monster/${iconPath}.png`, // url public
-						`https://enka.network/ui/${iconPath}.png` // fallback url
+						`${DUMP_SR}/${iconPath}`, // local file dump (private)
+						`${FOLDER_SR}/icon/monster/${id}.png`, // local file (public)
+						`${domainPublic}/resources/${nameGame}/icon/monster/${id}.png`, // url public
+						`` // TODO: find fallback url
 					)
 				}
 
 				// add name
-				var nameList1
-				if (!isEmpty(hashName1)) {
-					nameList1 = General.addMultiLangNamesAsObject(hashName1.toString(), LANG_GI, FOLDER_GI, obj.game)
-					//log.warn("found monster1", nameList1)
-				} else {
-					nameList1 = {}
-				}
-				var nameList2
-				if (!isEmpty(hashName2)) {
-					nameList2 = General.addMultiLangNamesAsObject(hashName2.toString(), LANG_GI, FOLDER_GI, obj.game)
-					//log.warn("found monster32", nameList2)
-				} else {
-					nameList2 = {}
-				}
-				var nameList3
-				if (!isEmpty(hashName3)) {
-					nameList3 = General.addMultiLangNamesAsObject(hashName3.toString(), LANG_GI, FOLDER_GI, obj.game)
-					//log.warn("found monster3", nameList3)
-				} else {
-					nameList3 = {}
-				}
-
-				//log.info(`hashName1: ${hashName1} - hashName2: ${hashName2} - hashName3: ${hashName3}`)
-				var name_final: Record<string, string> = {}
-				var nameLists = [nameList1, nameList2, nameList3]
-				var allLangs = new Set<string>()
-				nameLists.forEach((n) => Object.keys(n).forEach((lang) => allLangs.add(lang)))
-				allLangs.forEach((lang) => {
-					name_final[lang] = nameLists
-						.map((name) => name[lang])
-						.filter((text) => typeof text === "string" && text.trim() !== "")
-						.join(" - ")
-				})
-				if (Object.keys(name_final).length === 0) {
-					name_final = {
-						EN: mName
-					}
-				}
-				obj.name = name_final
+				obj.name = General.addMultiLangNamesAsObject(hashName.toString(), LANG_SR, FOLDER_SR, obj.game)
+				// add desc
+				obj.desc = General.addMultiLangNamesAsObject(hashInfo.toString(), LANG_SR, FOLDER_SR, obj.game)
 
 				//log.info("monster data:", obj)
 
 				// add to datebase
 				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Monster add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
+				log.info(`Monster add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} = db ${isAdd}`)
 
 				//await sleep(5)
 			} else {
@@ -718,10 +746,14 @@ class SR {
 			}
 		}
 	}
-*/
+
 	async runItem(rebuild: boolean): Promise<void> {
 		for (const [filePath, clazz] of Object.entries(EXCEL_SR)) {
 			if (clazz !== ClassItemExcelSR) continue
+
+			// not necessary here
+			if (filePath === "ItemConfigEquipment.json") continue
+			if (filePath === "ItemConfigRelic.json") continue
 
 			log.info(`Try to update ${filePath} data`)
 
@@ -744,9 +776,9 @@ class SR {
 						desc: {},
 						desc2: {},
 						icon: "",
+                        // other
 						starType: getStarSR(data.Rarity),
-						itemType: typeSub
-						// other
+						itemType: typeSub						
 					}
 
 					if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -785,10 +817,6 @@ class SR {
 							FOLDER_SR,
 							obj.game
 						)
-					} else {
-						obj.desc = {
-							EN: `UNKD1-${id}`
-						}
 					}
 					// add desc2
 					if (data.ItemDesc && !isEmpty(data.ItemDesc.Hash)) {
@@ -798,10 +826,6 @@ class SR {
 							FOLDER_SR,
 							obj.game
 						)
-					} else {
-						obj.desc2 = {
-							EN: `UNKD2-${id}`
-						}
 					}
 
 					//log.info("item data:", obj)
@@ -822,7 +846,7 @@ class SR {
 		log.info(`Try to update Avatar data`)
 		const getAvatar = this.excel.getConfig("AvatarConfig.json")
 		if (!getAvatar) {
-			log.errorNoStack(`Error get AvatarExcelConfigData.json`)
+			log.errorNoStack(`Error get AvatarConfig.json`)
 			return
 		}
 		const getAvatarItem = this.excel.getConfig("ItemConfigAvatar.json")
@@ -850,7 +874,8 @@ class SR {
 					desc: {},
 					desc2: {},
 					icon: "",
-					starType: getStarSR(infoCard.Rarity), // maybe just use star item instead of star avatar in infoAvatar (CombatPowerAvatarRarityType4)
+                    // other
+					starType: getStarSR(infoCard.Rarity), // maybe just use star item (infoCard) instead of star avatar in getAvatar (CombatPowerAvatarRarityType4)
 					weaponType: wp,
 					elementType: getDamageType(data.DamageType),
 					bodyType: -1 //isBoy ? 1 : 2 // TODO: get better bodytype
@@ -871,8 +896,9 @@ class SR {
 					`${DUMP_SR}/${iconPath}`, // local file dump (private)
 					`${FOLDER_SR}/icon/avatar/${id}.png`, // local file (public)
 					`${domainPublic}/resources/${nameGame}/icon/avatar/${id}.png`, // url public
-					`https://enka.network/ui/hsr/SpriteOutput/AvatarRoundIcon/${id}.png` // fallback url
+					`https://api.hakush.in/hsr/UI/avatarroundicon/${id}.webp` // fallback url
 				)
+				// https://enka.network/ui/hsr/SpriteOutput/AvatarRoundIcon/${id}.png
 
 				// add name
 				obj.name = General.addMultiLangNamesAsObject(
@@ -891,17 +917,13 @@ class SR {
 						FOLDER_SR,
 						obj.game
 					)
-				} else {
-					obj.desc = {
-						EN: `UNKD-${id}`
-					}
 				}
 
 				//log.info("Avatar data:", obj)
 
 				// add to datebase
 				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Avatar add > ${obj.id} (G${obj.game}) is rebuild: ${rebuild} = db ${isAdd}`)
+				log.info(`Avatar add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} = db ${isAdd}`)
 
 				//await sleep(5)
 			} else {
