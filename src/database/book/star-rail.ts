@@ -1,21 +1,29 @@
 import Logger from "@UT/logger"
 import {
 	ClassAvatarExcelSR,
+	ClassAvatarPropertyExcelSR,
 	ClassEquipmentExcelSR,
 	ClassItemExcelSR,
 	ClassMazePlaneExcelSR,
+	ClassMazePropExcelSR,
 	ClassMonsterExcelSR,
 	ClassMonsterTemplateExcelSR,
+	ClassRelicExcelSR,
+	ClassRelicMainAffixExcelSR,
+	ClassRelicSubAffixExcelSR,
 	ClassStageConfigExcelSR,
+	ItemArtifactConfig,
+	ItemArtifactMain,
+	ItemArtifactSub,
 	ItemAvatar,
-	ItemData,
+	ItemGadget,
 	ItemMonster,
 	ItemNormal,
 	ItemPlane,
 	ItemStage,
 	ItemWeapon
 } from "@UT/response"
-import { isEmpty, sleep } from "@UT/library"
+import { createEnum, isEmpty, sleep } from "@UT/library"
 import { domainPublic } from "@UT/share"
 import ExcelManager from "@UT/excel"
 // thrid party
@@ -23,7 +31,6 @@ import { isMainThread } from "worker_threads"
 // datebase
 import General from "@DB/book/general"
 import path from "path"
-import { count } from "console"
 
 const nameGame = "star-rail"
 
@@ -36,11 +43,16 @@ export const FOLDER_SR = `./src/server/web/public/resources/${nameGame}`
 export const LANG_SR = ["CHS", "CHT", "DE", "EN", "ES", "FR", "ID", "JP", "KR", "PT", "RU", "TH", "VI"] // TODO: TH_0(GI)=TH(SR),TH_1
 export const EXCEL_SR = {
 	"AvatarConfig.json": ClassAvatarExcelSR,
+	"AvatarPropertyConfig.json": ClassAvatarPropertyExcelSR,
 	"EquipmentConfig.json": ClassEquipmentExcelSR,
 	"MonsterConfig.json": ClassMonsterExcelSR, // info basic monster
 	"MonsterTemplateConfig.json": ClassMonsterTemplateExcelSR, // get icon monster
 	"MazePlane.json": ClassMazePlaneExcelSR, // This is different from scenes like in GI because they have floor id so they have to be made into different classes
 	"StageConfig.json": ClassStageConfigExcelSR, // This scene in SR but for battle
+	"MazeProp.json": ClassMazePropExcelSR,
+	"RelicConfig.json": ClassRelicExcelSR,
+	"RelicMainAffixConfig.json": ClassRelicMainAffixExcelSR,
+	"RelicSubAffixConfig.json": ClassRelicSubAffixExcelSR,
 	"ItemConfig.json": ClassItemExcelSR,
 	"ItemConfigAvatar.json": ClassItemExcelSR,
 	"ItemConfigAvatarPlayerIcon.json": ClassItemExcelSR,
@@ -100,6 +112,30 @@ enum DamageType {
 function getDamageType(name: string): number {
 	return (DamageType as any)[name] ?? -1
 }
+enum RelicType {
+	HEAD = 0,
+	HAND = 1,
+	BODY = 2,
+	FOOT = 3,
+	NECK = 4,
+	OBJECT = 5
+}
+function getRelicType(name: string): number {
+	return (RelicType as any)[name] ?? -1
+}
+function getRelicTypeNumber(id: number): string {
+	return RelicType[id] ?? "HEAD"
+}
+enum RelicMode {
+	BASIC = 0,
+	CUSTOM = 1
+}
+function getRelicMode(name: string): number {
+	return (RelicMode as any)[name] ?? -1
+}
+function getRelicModeNumber(id: number): string {
+	return RelicMode[id] ?? "BASIC"
+}
 class SR {
 	private excel!: ExcelManager<typeof EXCEL_SR>
 	constructor() {
@@ -113,7 +149,8 @@ class SR {
 	public async Update(
 		skip_update: boolean = false,
 		foce_save: boolean = false,
-		dont_build: boolean = false
+		dont_build: boolean = false,
+		replace: boolean = false
 	): Promise<void> {
 		log.info(`Try to update Genshin Impact resources`)
 
@@ -140,14 +177,14 @@ class SR {
 		}
 
 		log.info(`Building item data`)
-		//await this.runAvatar(foce_save)
-		//await this.runItem(foce_save)
-		//await this.runMonster(foce_save)
-		//await this.runWeapon(foce_save)
-		//await this.runPlane(foce_save)
-        await this.runStage(foce_save)
-		//await this.runGadget(foce_save)
-		//await this.runReliquary(foce_save)
+		//await this.runAvatar(foce_save, replace)
+		//await this.runItem(foce_save, replace)
+		//await this.runMonster(foce_save, replace)
+		//await this.runWeapon(foce_save, replace)
+		//await this.runPlane(foce_save, replace)
+		//await this.runStage(foce_save, replace)
+		//await this.runGadget(foce_save, replace)
+		await this.runRelic(foce_save, replace)
 		//await this.runQuest(foce_save)
 	}
 	/*
@@ -224,239 +261,262 @@ class SR {
 			}
 		}
 	}
+		*/
 
-	async runReliquary(rebuild: boolean): Promise<void> {
+	async runRelic(rebuild: boolean, replace: boolean): Promise<void> {
 		// Lock basic stats (TODO: remove stats in name)
-		const maxLevel = 21
-		const maxRank = 5
+		var maxLevel = 0
+		var maxStep = 2
 
-		const getManualTextMap = this.excel.getConfig("ManualTextMapConfigData.json")
-		if (!getManualTextMap) {
-			log.errorNoStack(`Error get ManualTextMapConfigData.json`)
+		const getRelicConfig = this.excel.getConfig("RelicConfig.json")
+		if (!getRelicConfig) {
+			log.errorNoStack(`Error get RelicConfig.json`)
 			return
 		}
-		const getReliquaryConfig = this.excel.getConfig("ReliquaryExcelConfigData.json")
-		if (!getReliquaryConfig) {
-			log.errorNoStack(`Error get ReliquaryExcelConfigData.json`)
+		const getItemConfigRelic = this.excel.getConfig("ItemConfigRelic.json")
+		if (!getItemConfigRelic) {
+			log.errorNoStack(`Error get ItemConfigRelic.json`)
 			return
 		}
-		const getReliquaryMain = this.excel.getConfig("ReliquaryMainPropExcelConfigData.json")
-		if (!getReliquaryMain) {
-			log.errorNoStack(`Error get ReliquaryMainPropExcelConfigData.json`)
+		const getRelicMainAffix = this.excel.getConfig("RelicMainAffixConfig.json")
+		if (!getRelicMainAffix) {
+			log.errorNoStack(`Error get RelicMainAffixConfig.json`)
 			return
 		}
-		const getReliquarySub = this.excel.getConfig("ReliquaryAffixExcelConfigData.json")
-		if (!getReliquarySub) {
-			log.errorNoStack(`Error get ReliquaryAffixExcelConfigData.json`)
+		const getRelicSubAffix = this.excel.getConfig("RelicSubAffixConfig.json")
+		if (!getRelicSubAffix) {
+			log.errorNoStack(`Error get RelicSubAffixConfig.json`)
 			return
 		}
-		const getReliquaryLevel = this.excel.getConfig("ReliquaryLevelExcelConfigData.json")
-		if (!getReliquaryLevel) {
-			log.errorNoStack(`Error get ReliquaryLevelExcelConfigData.json`)
+		const getAvatarProperty = this.excel.getConfig("AvatarPropertyConfig.json")
+		if (!getAvatarProperty) {
+			log.errorNoStack(`Error get AvatarPropertyConfig.json`)
 			return
 		}
 
 		// Process Main Artifact
-		log.info(`Try to update Reliquary Main`)
-		for (const main of Object.values(getReliquaryMain)) {
-			const id = main.id
-			const getPropType = main.propType
+		log.info(`Try to update Relic Main`)
+		for (const main of Object.values(getRelicMainAffix)) {
+			const id = main.AffixID
+			const grup = main.GroupID
+			const getPropType = main.Property
 
-			const hashEntry = Object.values(getManualTextMap).find((item) => item.textMapId === getPropType)
+			const hashEntry = Object.values(getAvatarProperty).find((item) => item.PropertyType === getPropType)
 			if (!hashEntry) {
-				log.warn(`ReliquaryMain not found`, name)
+				log.warn(`AvatarProperty1 not found`, getPropType)
 				continue
 			}
 
 			const obj: ItemArtifactMain = {
 				type: 7, // 7=ArtifactMain
-				game: 1,
+				game: 2,
 				id,
 				name: {},
 				desc: {},
+				desc2: {},
 				icon: "",
-				grup: main.propDepotId
+				grup
 			}
-			if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
-				log.info(`ReliquaryMain already exists, skipping ${obj.id} (${obj.type})`)
+			if (!rebuild && (await General.itemExists(obj.id, obj.type), { grup })) {
+				log.info(`RelicMain already exists, skipping ${obj.id} (${obj.type})`)
 				continue
 			}
 
-			let valueMain = 0
-			const TesLevel = Object.values(getReliquaryLevel).find(
-				(entry) =>
-					entry.level === maxLevel &&
-					entry.rank === maxRank &&
-					entry.addProps.some((prop) => prop.propType === getPropType)
-			)
-
-			if (!TesLevel) {
-				// If no corresponding level configuration found, skip this entry.
-				continue
+			var bonus = ``
+			if (getPropType.endsWith("Delta")) {
+				bonus = `${Math.floor(main.BaseValue.Value + main.LevelAdd.Value * maxLevel)}`
 			} else {
-				const propFound = TesLevel.addProps.find((prop) => prop.propType === getPropType)
-				if (propFound) {
-					valueMain = propFound.value
-				}
+				bonus = `${((main.BaseValue.Value + main.LevelAdd.Value * maxLevel) * 100).toFixed(2)} %`
 			}
 
-			const bonus = Calculate(getPropType, valueMain)
-
-			const mainPropHash = hashEntry.textMapContentTextMapHash
+			const mainPropHash = hashEntry.PropertyName.Hash
 			obj.name = General.addMultiLangNamesAsObject(
 				mainPropHash.toString(),
-				LANG_GI,
-				FOLDER_GI,
+				LANG_SR,
+				FOLDER_SR,
 				obj.game,
-				` (${bonus} > R${maxRank}LV${maxLevel})`
+				"",
+				` (${bonus})` //  > S${maxStep}LV${maxLevel}
 			)
 
-			//log.info("reliquary main:", obj)
+			//log.info("Relic main:", obj)
 
 			// add to datebase
-			var isAdd = await General.itemAdd(obj, rebuild)
-			log.info(`ReliquaryMain add > ${obj.id} (${obj.type}) is rebuild: ${rebuild} = db ${isAdd}`)
+			var isAdd = await General.itemAdd(obj, rebuild, replace, { grup })
+			log.info(
+				`RelicMain add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+			)
 		}
 
 		// Process Sub Artifact
-		log.info(`Try to update Reliquary Sub`)
-		for (const sub of Object.values(getReliquarySub)) {
-			const id = sub.id
-			const name = sub.propType
+		log.info(`Try to update Relic Sub`)
+		for (const sub of Object.values(getRelicSubAffix)) {
+			const id = sub.AffixID
+			const grup = sub.GroupID
+			const getPropType = sub.Property
 
-			const hashEntry = Object.values(getManualTextMap).find((item) => item.textMapId === name)
+			const hashEntry = Object.values(getAvatarProperty).find((item) => item.PropertyType === getPropType)
 			if (!hashEntry) {
-				log.warn(`ReliquarySub not found`, name)
+				log.warn(`AvatarProperty2 not found`, name)
 				continue
 			}
 
 			const obj: ItemArtifactSub = {
 				type: 8, // 8=ArtifactSub
-				game: 1,
+				game: 2,
 				id,
 				name: {},
 				desc: {},
+				desc2: {},
 				icon: "",
-				grup: sub.depotId
+				grup
 			}
 
-			if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
-				log.info(`ReliquarySub already exists, skipping ${obj.id} (${obj.type})`)
+			if (!rebuild && (await General.itemExists(obj.id, obj.type), { grup })) {
+				log.info(`RelicSub already exists, skipping ${obj.id} (${obj.type})`)
 				continue
 			}
 
-			const bonus = Calculate(name, sub.propValue)
+			var bonus = ``
+			var finalValue = sub.BaseValue.Value + sub.StepValue.Value * maxStep
+			if (getPropType.endsWith("Delta")) {
+				bonus = `${Math.floor(finalValue)}`
+			} else {
+				bonus = `${(finalValue * 100).toFixed(2)} %`
+			}
 
-			const mainPropHash = hashEntry.textMapContentTextMapHash
+			const subPropHash = hashEntry.PropertyName.Hash
 			obj.name = General.addMultiLangNamesAsObject(
-				mainPropHash.toString(),
-				LANG_GI,
-				FOLDER_GI,
+				subPropHash.toString(),
+				LANG_SR,
+				FOLDER_SR,
 				obj.game,
+				"",
 				` (${bonus})`
 			)
 
-			//log.info("reliquary sub:", obj)
+			//log.info("Relic sub:", obj)
 
 			// add to datebase
-			var isAdd = await General.itemAdd(obj, rebuild)
-			log.info(`ReliquarySub add > ${obj.id} (${obj.type}) is rebuild: ${rebuild} = db ${isAdd}`)
+			var isAdd = await General.itemAdd(obj, rebuild, replace, { grup })
+			log.info(
+				`RelicSub add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+			)
 		}
 
 		// Process Artifact (Item)
-		log.info(`Try to update Reliquary Config`)
-		for (const item of Object.values(getReliquaryConfig)) {
-			const nameItemHash = item.nameTextMapHash
-			const descriptionItemHash = item.descTextMapHash
-			const id = item.id
-			const rank = item.rankLevel
-			const iconName = item.icon
-			//const name = getHashLANG[hash] || getHashCN[hash] || 'N/A';
+		log.info(`Try to update Relic Config`)
+		//var enumTes1: string[] = []
+		//var enumTes2: string[] = []
+		for (const item of Object.values(getItemConfigRelic)) {
+			const nameItemHash = item.ItemName.Hash
+			const id = item.ID
+			const rank = item.Rarity
+			const iconPath = item.ItemIconPath.toLocaleLowerCase()
+			const iconName = path.basename(iconPath)
 
-			const hashEntry = Object.values(getManualTextMap).find((itemFind) => itemFind.textMapId === item.equipType)
-			if (!hashEntry) {
-				log.warn(`ReliquaryConfig not found`, nameItemHash)
+			// Config
+			var infoItem = Object.values(getRelicConfig).find((item) => item.ID === id)
+			if (!infoItem) {
+				log.warn(`RelicConfig not found: `, id)
 				continue
 			}
-			const nameIndexHash = hashEntry.textMapContentTextMapHash
 
 			const obj: ItemArtifactConfig = {
 				type: 9, // 9=ArtifactConfig
-				game: 1,
+				game: 2,
 				id,
 				name: {},
 				desc: {},
+				desc2: {},
 				icon: "",
-				equipType: item.equipType,
-				mainPropDepotId: item.mainPropDepotId,
-				appendPropDepotId: item.appendPropDepotId,
-				rankLevel: rank
+				starType: getStarSR(item.Rarity), // use item Rarity instead infoItem Rarity
+				equipType: getRelicType(infoItem.Type),
+				main: infoItem.MainAffixGroup,
+				sub: infoItem.SubAffixGroup
 			}
+
+			/*
+			if (!enumTes1.includes(infoItem.Type)) {
+				enumTes1.push(infoItem.Type)
+			}
+			if (!enumTes2.includes(infoItem.Mode)) {
+				enumTes2.push(infoItem.Mode)
+			}
+			*/
+
 			if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
-				log.info(`ReliquaryConfig already exists, skipping ${obj.id} (${obj.type})`)
+				log.info(`RelicConfig already exists, skipping ${obj.id} (${obj.type})`)
 				continue
 			}
 
-			obj.desc = General.addMultiLangNamesAsObject(descriptionItemHash.toString(), LANG_GI, FOLDER_GI, obj.game)
-
-			var nameList1 = General.addMultiLangNamesAsObject(nameItemHash.toString(), LANG_GI, FOLDER_GI, obj.game) // HEAD
-			var nameList2 = General.addMultiLangNamesAsObject(nameIndexHash.toString(), LANG_GI, FOLDER_GI, obj.game) // BODY
-
-			var name_final: Record<string, string> = {}
-			var nameLists = [nameList1, nameList2]
-			var allLangs = new Set<string>()
-			nameLists.forEach((n) => Object.keys(n).forEach((lang) => allLangs.add(lang)))
-			allLangs.forEach((lang) => {
-				name_final[lang] =
-					nameLists
-						.map((name) => name[lang])
-						.filter((text) => typeof text === "string" && text.trim() !== "")
-						.join(" - ") + ` (R${rank})`
-			})
-			/*
-            if (Object.keys(name_final).length === 0) {
-                name_final = {
-                    EN: mName
-                }
-            }
-            
-			obj.name = name_final
-			if (!isEmpty(iconName)) {
-				obj.icon = await General.downloadImageOrCopyLocal(
-					`${DUMP_GI}/${iconName}.png`, // local file dump (private)
-					`${FOLDER_GI}/icon/artifact/${iconName}.png`, // local file (public)
-					`${domainPublic}/resources/${nameGame}/icon/artifact/${iconName}.png`, // url public
-					`https://upload-os-bbs.mihoyo.com/game_record/genshin/equip/${iconName}.png` // fallback url
+			obj.name = General.addMultiLangNamesAsObject(nameItemHash.toString(), LANG_SR, FOLDER_SR, obj.game)
+			if (Object.keys(obj.name).length === 0) {
+				log.warn(`skip relic ${id}`)
+				continue
+			}
+			if (item.ItemBGDesc && !isEmpty(item.ItemBGDesc.Hash)) {
+				obj.desc = General.addMultiLangNamesAsObject(
+					item.ItemBGDesc.Hash.toString(),
+					LANG_SR,
+					FOLDER_SR,
+					obj.game
 				)
 			}
+			if (item.ItemDesc && !isEmpty(item.ItemDesc.Hash)) {
+				obj.desc2 = General.addMultiLangNamesAsObject(
+					item.ItemDesc.Hash.toString(),
+					LANG_SR,
+					FOLDER_SR,
+					obj.game
+				)
+			}
+			obj.icon = await General.downloadImageOrCopyLocal(
+				`${DUMP_SR}/${iconPath}`, // local file dump (private)
+				`${FOLDER_SR}/icon/relic/${iconName}`, // local file (public)
+				`${domainPublic}/resources/${nameGame}/icon/relic/${iconName}`, // url public
+				`` // fallback url
+			)
 
-			//log.info("reliquary config:", obj)
+			//log.info("Relic config:", obj)
 
 			// add to datebase
 			var isAdd = await General.itemAdd(obj, rebuild)
-			log.info(`ReliquaryConfig add > ${obj.id} (${obj.type}) is rebuild: ${rebuild} = db ${isAdd}`)
+			log.info(
+				`RelicConfig add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+			)
 		}
+		//log.info(`Relic Config type:`, createEnum(enumTes1, "getRelicType"))
+		//log.info(`Relic Config mode:`, createEnum(enumTes2, "getRelicMode"))
 	}
 
-	async runGadget(rebuild: boolean): Promise<void> {
-		const getGadget = this.excel.getConfig("GadgetExcelConfigData.json")
+	async runGadget(rebuild: boolean, replace: boolean): Promise<void> {
+		const getGadget = this.excel.getConfig("MazeProp.json")
 		if (!getGadget) {
-			log.errorNoStack(`Error get GadgetExcelConfigData.json`)
+			log.errorNoStack(`Error get MazeProp.json`)
 			return
 		}
 		for (const data of Object.values(getGadget)) {
-			if (data && data.id) {
-				const id = data.id
-				const nameJson = data.jsonName
+			if (data) {
+				const id = data.ID
+				var name1 = data.JsonPath.replace(/^.*\//, "")
+					.replace(/\.json$/, "")
+					.replace("_Config", "")
+				if (isEmpty(name1)) {
+					name1 = data.ConfigEntityPath
+				}
+				var iconPath = data.PropIconPath.toLocaleLowerCase()
+				var iconBaseName = path.basename(iconPath)
 
 				const obj: ItemGadget = {
 					type: 6, // 6=gadget
-					game: 1,
+					game: 2,
 					id,
 					name: {},
 					desc: {},
+					desc2: {},
 					icon: "", // TODO: add icon
-					typeGadget: data.type
+					typeGadget: -1 //data.PropType
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -465,26 +525,34 @@ class SR {
 				}
 
 				// add name
-				obj.desc = General.addMultiLangNamesAsObject(
-					data.nameTextMapHash.toString(),
-					LANG_GI,
-					FOLDER_GI,
-					obj.game
-				)
-				// add desc
 				obj.name = General.addMultiLangNamesAsObject(
-					data.interactNameTextMapHash.toString(),
-					LANG_GI,
-					FOLDER_GI,
+					data.PropName.Hash.toString(),
+					LANG_SR,
+					FOLDER_SR,
 					obj.game,
-					nameJson
+					name1
 				)
+				if (Object.keys(obj.name).length === 0) {
+					log.warn(`skip gadget ${id}`)
+					continue
+				}
+
+				if (!isEmpty(iconPath)) {
+					obj.icon = await General.downloadImageOrCopyLocal(
+						`${DUMP_SR}/${iconPath}`, // local file dump (private)
+						`${FOLDER_SR}/icon/gadget/${iconBaseName}`, // local file (public)
+						`${domainPublic}/resources/${nameGame}/icon/gadget/${iconBaseName}`, // url public
+						`` // TODO: find fallback url
+					)
+				}
 
 				//log.info("gadget data:", obj)
 
 				// add to datebase
-				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Gadget add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
+				var isAdd = await General.itemAdd(obj, rebuild, replace)
+				log.info(
+					`Gadget add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+				)
 
 				//await sleep(5)
 			} else {
@@ -492,9 +560,8 @@ class SR {
 			}
 		}
 	}
-*/
 
-	async runStage(rebuild: boolean): Promise<void> {
+	async runStage(rebuild: boolean, replace: boolean): Promise<void> {
 		const getStage = this.excel.getConfig("StageConfig.json")
 		if (!getStage) {
 			log.errorNoStack(`Error get StageConfig.json`)
@@ -508,6 +575,19 @@ class SR {
 				const nameStage = data.StageName.Hash
 				const typeStage = data.StageType
 
+				/*
+                CocoonConfig > MappingInfo
+                StageInfiniteWaveConfig > StageInfiniteGroup
+                ClockParkActivity,StarFightActivity(notall),RogueEndlessActivity,Mainline(notall) > PlaneEvent? (NO NAME)
+                AvatarDemoConfig,SwordTrainingExam
+
+                ~ IDK ~
+                ChallengeGroupConfig (Moc)
+                ChallengeStoryGroupConfig (Pure Fiction Enemies)
+                ChallengeBossGroupConfig (Apocalytic Shadow Enemies)
+                */
+				//if (!["Cocoon", "ClockParkActivity", "Trial", "SwordTraining","StarFightActivity","RogueEndlessActivity"].includes(typeStage)) continue
+
 				const obj: ItemStage = {
 					type: 12, // 12=Stage for SR
 					game: 2,
@@ -516,9 +596,9 @@ class SR {
 					desc: {},
 					desc2: {},
 					icon: "",
-                    // other
-					stageType: typeStage,
-                    stageLevel: data.Level,					
+					// other
+					stageType: -1, //typeStage,
+					stageLevel: data.Level
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -527,19 +607,26 @@ class SR {
 				}
 
 				// add name
-                /*
-                TODO: get better info
-                ChallengeGroupConfig (Moc)
-                ChallengeStoryGroupConfig (Pure Fiction Enemies)
-                ChallengeBossGroupConfig (Apocalytic Shadow Enemies)
-                */
-				obj.name = General.addMultiLangNamesAsObject(nameStage.toString(), LANG_SR, FOLDER_SR, obj.game, ` (${typeStage}) (L${data.Level})`)
+				obj.name = General.addMultiLangNamesAsObject(
+					nameStage.toString(),
+					LANG_SR,
+					FOLDER_SR,
+					obj.game,
+					"",
+					` (${typeStage}) (LV${data.Level})`
+				)
+				if (Object.keys(obj.name).length === 0) {
+					log.warn(`skip Stage ${id} > ${typeStage}`)
+					continue
+				}
 
 				//log.info("stage data:", obj)
 
 				// add to datebase
-				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Scene add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} = db ${isAdd}`)
+				var isAdd = await General.itemAdd(obj, rebuild, replace)
+				log.info(
+					`Stage add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+				)
 
 				//await sleep(5)
 			} else {
@@ -548,7 +635,7 @@ class SR {
 		}
 	}
 
-	async runPlane(rebuild: boolean): Promise<void> {
+	async runPlane(rebuild: boolean, replace: boolean): Promise<void> {
 		const getPlane = this.excel.getConfig("MazePlane.json")
 		if (!getPlane) {
 			log.errorNoStack(`Error get MazePlane.json`)
@@ -571,9 +658,9 @@ class SR {
 					name: {},
 					desc: {},
 					desc2: {},
-					icon: "",					
+					icon: "",
 					// other
-                    planeType: typePlane,
+					planeType: -1, //typePlane,
 					worldId: data.WorldID,
 					startFloorId: data.StartFloorID,
 					floorIdList: data.FloorIDList
@@ -586,12 +673,18 @@ class SR {
 
 				// add name
 				obj.name = General.addMultiLangNamesAsObject(namePlane.toString(), LANG_SR, FOLDER_SR, obj.game)
+				if (Object.keys(obj.name).length === 0) {
+					log.warn(`skip plane ${id}`)
+					continue
+				}
 
 				//log.info("plane data:", obj)
 
 				// add to datebase
-				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Plane add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} = db ${isAdd}`)
+				var isAdd = await General.itemAdd(obj, rebuild, replace)
+				log.info(
+					`Plane add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+				)
 
 				//await sleep(5)
 			} else {
@@ -600,7 +693,7 @@ class SR {
 		}
 	}
 
-	async runWeapon(rebuild: boolean): Promise<void> {
+	async runWeapon(rebuild: boolean, replace: boolean): Promise<void> {
 		const getWeapon = this.excel.getConfig("EquipmentConfig.json")
 		if (!getWeapon) {
 			log.errorNoStack(`Error get EquipmentConfig.json`)
@@ -635,13 +728,20 @@ class SR {
 					desc: {},
 					desc2: {},
 					icon: "",
-                    // other
+					// other
 					starType: getStarSR(infoItem.Rarity), // get star from item not weapon ?
-					weaponType: getAvatarBase(data.AvatarBaseType)					
+					weaponType: getAvatarBase(data.AvatarBaseType)
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
 					log.info(`Weapon already exists, skipping ${obj.id} (${obj.type})`)
+					continue
+				}
+
+				// add name
+				obj.name = General.addMultiLangNamesAsObject(hash1.toString(), LANG_SR, FOLDER_SR, obj.game)
+				if (Object.keys(obj.name).length === 0) {
+					log.warn(`skip weapon ${id}`)
 					continue
 				}
 
@@ -653,8 +753,6 @@ class SR {
 				)
 				// https://sr.yatta.moe/hsr/assets/UI//equipment/medium/${id}.png
 
-				// add name
-				obj.name = General.addMultiLangNamesAsObject(hash1.toString(), LANG_SR, FOLDER_SR, obj.game)
 				// add desc
 				obj.desc = General.addMultiLangNamesAsObject(hash2.toString(), LANG_SR, FOLDER_SR, obj.game)
 				// add desc2
@@ -663,8 +761,10 @@ class SR {
 				//log.info("weapon data:", obj)
 
 				// add to datebase
-				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Weapon add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} = db ${isAdd}`)
+				var isAdd = await General.itemAdd(obj, rebuild, replace)
+				log.info(
+					`Weapon add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+				)
 
 				await sleep(5)
 			} else {
@@ -673,7 +773,7 @@ class SR {
 		}
 	}
 
-	async runMonster(rebuild: boolean): Promise<void> {
+	async runMonster(rebuild: boolean, replace: boolean): Promise<void> {
 		const getMonsterConfig = this.excel.getConfig("MonsterConfig.json")
 		if (!getMonsterConfig) {
 			log.errorNoStack(`Error get MonsterConfig.json`)
@@ -709,8 +809,8 @@ class SR {
 					desc: {},
 					desc2: {},
 					icon: "",
-                    // other
-					typeMonster: data.Rank
+					// other
+					typeMonster: -1 // maybe use CustomValueTags
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -718,8 +818,14 @@ class SR {
 					continue
 				}
 
-				const iconPath = data.RoundIconPath.toLocaleLowerCase()
+				// add name
+				obj.name = General.addMultiLangNamesAsObject(hashName.toString(), LANG_SR, FOLDER_SR, obj.game)
+				if (Object.keys(obj.name).length === 0) {
+					log.warn(`skip monster ${id}`)
+					continue
+				}
 
+				const iconPath = data.RoundIconPath.toLocaleLowerCase()
 				if (!isEmpty(iconPath)) {
 					obj.icon = await General.downloadImageOrCopyLocal(
 						`${DUMP_SR}/${iconPath}`, // local file dump (private)
@@ -729,16 +835,16 @@ class SR {
 					)
 				}
 
-				// add name
-				obj.name = General.addMultiLangNamesAsObject(hashName.toString(), LANG_SR, FOLDER_SR, obj.game)
 				// add desc
 				obj.desc = General.addMultiLangNamesAsObject(hashInfo.toString(), LANG_SR, FOLDER_SR, obj.game)
 
 				//log.info("monster data:", obj)
 
 				// add to datebase
-				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Monster add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} = db ${isAdd}`)
+				var isAdd = await General.itemAdd(obj, rebuild, replace)
+				log.info(
+					`Monster add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+				)
 
 				//await sleep(5)
 			} else {
@@ -747,7 +853,7 @@ class SR {
 		}
 	}
 
-	async runItem(rebuild: boolean): Promise<void> {
+	async runItem(rebuild: boolean, replace: boolean): Promise<void> {
 		for (const [filePath, clazz] of Object.entries(EXCEL_SR)) {
 			if (clazz !== ClassItemExcelSR) continue
 
@@ -776,23 +882,14 @@ class SR {
 						desc: {},
 						desc2: {},
 						icon: "",
-                        // other
+						// other
 						starType: getStarSR(data.Rarity),
-						itemType: typeSub						
+						itemType: -1 //typeSub
 					}
 
 					if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
 						log.info(`Item already exists, skipping ${obj.id} (${obj.type})`)
 						continue
-					}
-
-					if (!isEmpty(iconPath)) {
-						obj.icon = await General.downloadImageOrCopyLocal(
-							`${DUMP_SR}/${iconPath}`, // local file dump (private)
-							`${FOLDER_SR}/icon/item/${id}.png`, // local file (public)
-							`${domainPublic}/resources/${nameGame}/icon/item/${id}.png`, // url public
-							`` // TODO: find fallback url
-						)
 					}
 
 					// add name
@@ -803,10 +900,23 @@ class SR {
 							FOLDER_SR,
 							obj.game
 						)
+						if (Object.keys(obj.name).length === 0) {
+							log.warn(`skip1 item ${id}`)
+							continue
+						}
 					} else {
-						log.warn(`skip item ${id} (${typeSub}) > ${filePath}`)
+						log.warn(`skip2 item ${id} (${typeSub}) > ${filePath}`)
 						// TODO: Mission,TravelBrochurePaster,ChessRogueDiceSurface,Virtual,Gift,PlanetFesItem
 						continue
+					}
+
+					if (!isEmpty(iconPath)) {
+						obj.icon = await General.downloadImageOrCopyLocal(
+							`${DUMP_SR}/${iconPath}`, // local file dump (private)
+							`${FOLDER_SR}/icon/item/${id}.png`, // local file (public)
+							`${domainPublic}/resources/${nameGame}/icon/item/${id}.png`, // url public
+							`` // TODO: find fallback url
+						)
 					}
 
 					// add desc
@@ -831,8 +941,10 @@ class SR {
 					//log.info("item data:", obj)
 
 					// add to datebase
-					var isAdd = await General.itemAdd(obj, rebuild)
-					log.info(`Item add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} = db ${isAdd}`)
+					var isAdd = await General.itemAdd(obj, rebuild, replace)
+					log.info(
+						`Item add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+					)
 
 					//await sleep(5)
 				} else {
@@ -842,7 +954,7 @@ class SR {
 		}
 	}
 
-	async runAvatar(rebuild: boolean): Promise<void> {
+	async runAvatar(rebuild: boolean, replace: boolean): Promise<void> {
 		log.info(`Try to update Avatar data`)
 		const getAvatar = this.excel.getConfig("AvatarConfig.json")
 		if (!getAvatar) {
@@ -874,7 +986,7 @@ class SR {
 					desc: {},
 					desc2: {},
 					icon: "",
-                    // other
+					// other
 					starType: getStarSR(infoCard.Rarity), // maybe just use star item (infoCard) instead of star avatar in getAvatar (CombatPowerAvatarRarityType4)
 					weaponType: wp,
 					elementType: getDamageType(data.DamageType),
@@ -892,6 +1004,21 @@ class SR {
 					continue
 				}
 
+				// add name
+				obj.name = General.addMultiLangNamesAsObject(
+					data.AvatarName.Hash.toString(),
+					LANG_SR,
+					FOLDER_SR,
+					obj.game,
+					"",
+					"",
+					`${isBoy ? "Boy" : "Girl"} ${getAvatarBaseNumber(wp)}` // TODO: find NT name this
+				)
+				if (Object.keys(obj.name).length === 0) {
+					log.warn(`skip avatar ${id}`)
+					continue
+				}
+
 				obj.icon = await General.downloadImageOrCopyLocal(
 					`${DUMP_SR}/${iconPath}`, // local file dump (private)
 					`${FOLDER_SR}/icon/avatar/${id}.png`, // local file (public)
@@ -900,15 +1027,6 @@ class SR {
 				)
 				// https://enka.network/ui/hsr/SpriteOutput/AvatarRoundIcon/${id}.png
 
-				// add name
-				obj.name = General.addMultiLangNamesAsObject(
-					data.AvatarName.Hash.toString(),
-					LANG_SR,
-					FOLDER_SR,
-					obj.game,
-					"",
-					`${isBoy ? "Boy" : "Girl"} ${getAvatarBaseNumber(wp)}` // TODO: find NT name this
-				)
 				// add desc
 				if (infoCard.ItemBGDesc && !isEmpty(infoCard.ItemBGDesc.Hash)) {
 					obj.desc = General.addMultiLangNamesAsObject(
@@ -922,8 +1040,10 @@ class SR {
 				//log.info("Avatar data:", obj)
 
 				// add to datebase
-				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Avatar add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} = db ${isAdd}`)
+				var isAdd = await General.itemAdd(obj, rebuild, replace)
+				log.info(
+					`Avatar add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+				)
 
 				//await sleep(5)
 			} else {

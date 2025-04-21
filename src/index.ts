@@ -17,18 +17,19 @@ log.info(`Hi ${profile.title} | Domain: ${domain} | ${profile.name} | LOCAL IP: 
 async function runServiceWithRetry(importPath: string, runFuncName: string) {
 	while (true) {
 		try {
-			log.info(`Running ${importPath}...`)
+			log.info(`Running ${importPath}…`)
 			const module = await import(importPath)
 			const runFunc = module.default?.[runFuncName]
 			if (typeof runFunc === "function") {
-				runFunc()
-				break // Exit loop if runFunc succeeds
-			} else {
-				throw new Error(`${runFuncName} is not a function in ${importPath}`)
+				// ← this await is crucial
+				await runFunc()
+				log.info(`${importPath} exited cleanly.`)
+				break
 			}
+			throw new Error(`${runFuncName} is not a function in ${importPath}`)
 		} catch (error: any) {
-			log.error(`Error in ${importPath}: ${error.message}. Retrying in 5 seconds...`)
-			await sleep(5) // 5 seconds delay before retrying
+			log.error(`Error in ${importPath}: ${error.message}. Retrying in 5s…`)
+			await sleep(5)
 		}
 	}
 }

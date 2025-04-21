@@ -11,7 +11,7 @@ import {
 	ClassMonsterNameSpecialExcelGI,
 	ClassQuestExcel,
 	ClassReliquaryAffixExcel,
-	ClassReliquaryExcel,
+	ClassReliquaryExcelGI,
 	ClassReliquaryLevelExcel,
 	ClassReliquaryMainPropExcel,
 	ClassSceneExcelGI,
@@ -57,7 +57,7 @@ export const EXCEL_GI = {
 	"SceneExcelConfigData.json": ClassSceneExcelGI,
 	"GadgetExcelConfigData.json": ClassGadgetExcel,
 	"ManualTextMapConfigData.json": ClassManualTextMapExcel,
-	"ReliquaryExcelConfigData.json": ClassReliquaryExcel,
+	"ReliquaryExcelConfigData.json": ClassReliquaryExcelGI,
 	"ReliquaryMainPropExcelConfigData.json": ClassReliquaryMainPropExcel,
 	"ReliquaryAffixExcelConfigData.json": ClassReliquaryAffixExcel,
 	"ReliquaryLevelExcelConfigData.json": ClassReliquaryLevelExcel,
@@ -131,7 +131,7 @@ enum BodyType {
 	BODY_GIRL = 2,
 	BODY_LADY = 2,
 	NPC_FEMALE = 2,
-	BODY_LOLI = 2, // most girl and testing stuff here lol why hoyo
+	BODY_LOLI = 2 // most girl and testing stuff here lol why hoyo
 }
 enum ElementType {
 	None = 0,
@@ -146,6 +146,114 @@ enum ElementType {
 	AntiFire = 9,
 	Default = 255
 }
+enum EquipType {
+	EQUIP_NONE = 0,
+	EQUIP_BRACER = 1,
+	EQUIP_NECKLACE = 2,
+	EQUIP_SHOES = 3,
+	EQUIP_RING = 4,
+	EQUIP_DRESS = 5,
+	EQUIP_WEAPON = 6
+}
+enum MonsterType {
+	MONSTER_NONE = 0,
+	MONSTER_ORDINARY = 1,
+	MONSTER_BOSS = 2,
+	MONSTER_ENV_ANIMAL = 3,
+	MONSTER_LITTLE_MONSTER = 4,
+	MONSTER_FISH = 5
+}
+enum EntityType {
+	None = 0,
+	Avatar = 1,
+	Monster = 2,
+	Bullet = 3,
+	AttackPhyisicalUnit = 4,
+	AOE = 5,
+	Camera = 6,
+	EnviroArea = 7,
+	Equip = 8,
+	MonsterEquip = 9,
+	Grass = 10,
+	Level = 11,
+	NPC = 12,
+	TransPointFirst = 13,
+	TransPointFirstGadget = 14,
+	TransPointSecond = 15,
+	TransPointSecondGadget = 16,
+	DropItem = 17,
+	Field = 18,
+	Gadget = 19,
+	Water = 20,
+	GatherPoint = 21,
+	GatherObject = 22,
+	AirflowField = 23,
+	SpeedupField = 24,
+	Gear = 25,
+	Chest = 26,
+	EnergyBall = 27,
+	ElemCrystal = 28,
+	Timeline = 29,
+	Worktop = 30,
+	Team = 31,
+	Platform = 32,
+	AmberWind = 33,
+	EnvAnimal = 34,
+	SealGadget = 35,
+	Tree = 36,
+	Bush = 37,
+	QuestGadget = 38,
+	Lightning = 39,
+	RewardPoint = 40,
+	RewardStatue = 41,
+	MPLevel = 42,
+	WindSeed = 43,
+	MpPlayRewardPoint = 44,
+	ViewPoint = 45,
+	RemoteAvatar = 46,
+	GeneralRewardPoint = 47,
+	PlayTeam = 48,
+	OfferingGadget = 49,
+	EyePoint = 50,
+	MiracleRing = 51,
+	Foundation = 52,
+	WidgetGadget = 53,
+	Vehicle = 54,
+	SubEquip = 55,
+	FishRod = 56,
+	CustomTile = 57,
+	FishPool = 58,
+	CustomGadget = 59,
+	BlackMud = 60,
+	RoguelikeOperatorGadget = 61,
+	NightCrowGadget = 62,
+	Projector = 63,
+	Screen = 64,
+	EchoShell = 65,
+	UIInteractGadget = 66,
+	CurveMoveGadget = 67,
+	JourneyGearOperatorGadget = 69,
+	Partner = 70,
+	CoinCollectLevelGadget = 72,
+	UgcSpecialGadget = 73,
+	UgcTowerLevelUpGadget = 74,
+	DeshretObeliskGadget = 71,
+	Region = 98,
+	PlaceHolder = 99
+}
+enum SceneType {
+	SCENE_NONE = 0,
+	SCENE_WORLD = 1,
+	SCENE_DUNGEON = 2,
+	SCENE_ROOM = 3,
+	SCENE_HOME_WORLD = 4,
+	SCENE_HOME_ROOM = 5,
+	SCENE_ACTIVITY = 6
+}
+enum QuestShowType {
+	QUEST_SHOW = 0,
+	QUEST_HIDDEN = 1
+}
 function getWeaponTypeNumber(name: string): number {
 	return (WeaponType as any)[name] ?? -1
 }
@@ -155,6 +263,37 @@ function getBodyTypeNumber(name: string): number {
 function getElementType(name: string): number {
 	return (ElementType as any)[name] ?? -1
 }
+function getEquipType(name: string): number {
+	return (EquipType as any)[name] ?? -1
+}
+function getEquipTypeName(id: number): string {
+	return EquipType[id] ?? "EQUIP_NONE"
+}
+function getMonsterType(name: string): number {
+	return (MonsterType as any)[name] ?? -1
+}
+function getMonsterTypeName(id: number): string {
+	return MonsterType[id] ?? "MONSTER_NONE"
+}
+function getEntityTypeId(name: string): number {
+	return (EntityType as any)[name] ?? -1
+}
+function getEntityTypeName(id: number): string {
+	return EntityType[id] ?? "None"
+}
+function getSceneTypeId(name: string): number {
+	return (SceneType as any)[name] ?? -1
+}
+function getSceneTypeName(id: number): string {
+	return SceneType[id] ?? "SCENE_NONE"
+}
+function getQuestShowTypeId(name: string): number {
+	return (QuestShowType as any)[name] ?? 0
+}
+function getQuestShowTypeName(id: number): string {
+	return QuestShowType[id] ?? "QUEST_SHOW"
+}
+
 class GI {
 	private excel!: ExcelManager<typeof EXCEL_GI>
 	constructor() {
@@ -168,7 +307,8 @@ class GI {
 	public async Update(
 		skip_update: boolean = false,
 		foce_save: boolean = false,
-		dont_build: boolean = false
+		dont_build: boolean = false,
+		replace: boolean = false
 	): Promise<void> {
 		log.info(`Try to update Genshin Impact resources`)
 
@@ -195,17 +335,17 @@ class GI {
 		}
 
 		log.info(`Building item data`)
-		await this.runAvatar(foce_save)
-		await this.runItem(foce_save)
-		await this.runMonster(foce_save)
-		await this.runWeapon(foce_save)
-		await this.runScene(foce_save)
-		await this.runGadget(foce_save)
-		await this.runReliquary(foce_save)
-		await this.runQuest(foce_save)
+		await this.runAvatar(foce_save, replace)
+		await this.runItem(foce_save, replace)
+		await this.runMonster(foce_save, replace)
+		await this.runWeapon(foce_save, replace)
+		await this.runScene(foce_save, replace)
+		await this.runGadget(foce_save, replace)
+		await this.runReliquary(foce_save, replace)
+		await this.runQuest(foce_save, replace)
 	}
 
-	async runQuest(rebuild: boolean): Promise<void> {
+	async runQuest(rebuild: boolean, replace: boolean): Promise<void> {
 		const getQuest = this.excel.getConfig("QuestExcelConfigData.json")
 		if (!getQuest) {
 			log.errorNoStack(`Error get QuestExcelConfigData.json`)
@@ -229,7 +369,7 @@ class GI {
 					desc2: {},
 					guideTips: {},
 					icon: "",
-					showType: data.failCondComb, // showType
+					showType: getQuestShowTypeId(data.failCondComb), // showType
 					order: data.order
 				}
 
@@ -240,20 +380,18 @@ class GI {
 
 				if (!isEmpty(hashDesc)) {
 					obj.name = General.addMultiLangNamesAsObject(hashDesc.toString(), LANG_GI, FOLDER_GI, obj.game)
-				} else {
+				}
+				if (Object.keys(obj.name).length === 0) {
+					//log.warn(`skip quest ${idMain}`)
+					//continue
 					obj.name = {
-						EN: `UNKN-${idMain}-${idSub}`
+						EN: `???` //  ${idMain}/${idSub}
 					}
 				}
 
 				if (!isEmpty(hashStep)) {
 					obj.desc = General.addMultiLangNamesAsObject(hashStep.toString(), LANG_GI, FOLDER_GI, obj.game)
-				} else {
-					obj.desc = {
-						EN: `UNKS-${idMain}-${idSub}`
-					}
 				}
-
 				if (!isEmpty(hashGuide)) {
 					obj.guideTips = General.addMultiLangNamesAsObject(
 						hashGuide.toString(),
@@ -261,17 +399,15 @@ class GI {
 						FOLDER_GI,
 						obj.game
 					)
-				} else {
-					obj.guideTips = {
-						EN: `UNKG-${idMain}-${idSub}`
-					}
 				}
 
 				//log.info("quest data:", obj)
 
 				// add to datebase
-				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Quest add > ${obj.id} (${obj.type}) is rebuild: ${rebuild} = db ${isAdd}`)
+				var isAdd = await General.itemAdd(obj, rebuild, replace)
+				log.info(
+					`Quest add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+				)
 
 				//await sleep(5)
 			} else {
@@ -280,7 +416,7 @@ class GI {
 		}
 	}
 
-	async runReliquary(rebuild: boolean): Promise<void> {
+	async runReliquary(rebuild: boolean, replace: boolean): Promise<void> {
 		// Lock basic stats (TODO: remove stats in name)
 		const maxLevel = 21
 		const maxRank = 5
@@ -364,14 +500,17 @@ class GI {
 				LANG_GI,
 				FOLDER_GI,
 				obj.game,
+				"",
 				` (${bonus} > R${maxRank}LV${maxLevel})`
 			)
 
 			//log.info("reliquary main:", obj)
 
 			// add to datebase
-			var isAdd = await General.itemAdd(obj, rebuild)
-			log.info(`ReliquaryMain add > ${obj.id} (${obj.type}) is rebuild: ${rebuild} = db ${isAdd}`)
+			var isAdd = await General.itemAdd(obj, rebuild, replace)
+			log.info(
+				`ReliquaryMain add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+			)
 		}
 
 		// Process Sub Artifact
@@ -410,14 +549,17 @@ class GI {
 				LANG_GI,
 				FOLDER_GI,
 				obj.game,
+				"",
 				` (${bonus})`
 			)
 
 			//log.info("reliquary sub:", obj)
 
 			// add to datebase
-			var isAdd = await General.itemAdd(obj, rebuild)
-			log.info(`ReliquarySub add > ${obj.id} (${obj.type}) is rebuild: ${rebuild} = db ${isAdd}`)
+			var isAdd = await General.itemAdd(obj, rebuild, replace)
+			log.info(
+				`ReliquarySub add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+			)
 		}
 
 		// Process Artifact (Item)
@@ -445,10 +587,10 @@ class GI {
 				desc: {},
 				desc2: {},
 				icon: "",
-				equipType: item.equipType,
-				mainPropDepotId: item.mainPropDepotId,
-				appendPropDepotId: item.appendPropDepotId,
-				rankLevel: rank
+				main: item.mainPropDepotId,
+				sub: item.appendPropDepotId,
+				starType: rank,
+				equipType: getEquipType(item.equipType)
 			}
 			if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
 				log.info(`ReliquaryConfig already exists, skipping ${obj.id} (${obj.type})`)
@@ -491,12 +633,14 @@ class GI {
 			//log.info("reliquary config:", obj)
 
 			// add to datebase
-			var isAdd = await General.itemAdd(obj, rebuild)
-			log.info(`ReliquaryConfig add > ${obj.id} (${obj.type}) is rebuild: ${rebuild} = db ${isAdd}`)
+			var isAdd = await General.itemAdd(obj, rebuild, replace)
+			log.info(
+				`ReliquaryConfig add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+			)
 		}
 	}
 
-	async runGadget(rebuild: boolean): Promise<void> {
+	async runGadget(rebuild: boolean, replace: boolean): Promise<void> {
 		const getGadget = this.excel.getConfig("GadgetExcelConfigData.json")
 		if (!getGadget) {
 			log.errorNoStack(`Error get GadgetExcelConfigData.json`)
@@ -515,7 +659,7 @@ class GI {
 					desc: {},
 					desc2: {},
 					icon: "", // TODO: add icon
-					typeGadget: data.type
+					typeGadget: getEntityTypeId(data.type)
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -524,13 +668,6 @@ class GI {
 				}
 
 				// add name
-				obj.desc = General.addMultiLangNamesAsObject(
-					data.nameTextMapHash.toString(),
-					LANG_GI,
-					FOLDER_GI,
-					obj.game
-				)
-				// add desc
 				obj.name = General.addMultiLangNamesAsObject(
 					data.interactNameTextMapHash.toString(),
 					LANG_GI,
@@ -538,12 +675,25 @@ class GI {
 					obj.game,
 					nameJson
 				)
+				if (Object.keys(obj.name).length === 0) {
+					log.warn(`skip gadget ${id}`)
+					continue
+				}
+				// add desc
+				obj.desc = General.addMultiLangNamesAsObject(
+					data.nameTextMapHash.toString(),
+					LANG_GI,
+					FOLDER_GI,
+					obj.game
+				)
 
 				//log.info("gadget data:", obj)
 
 				// add to datebase
-				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Gadget add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
+				var isAdd = await General.itemAdd(obj, rebuild, replace)
+				log.info(
+					`Gadget add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+				)
 
 				//await sleep(5)
 			} else {
@@ -552,7 +702,7 @@ class GI {
 		}
 	}
 
-	async runScene(rebuild: boolean): Promise<void> {
+	async runScene(rebuild: boolean, replace: boolean): Promise<void> {
 		const getScene = this.excel.getConfig("SceneExcelConfigData.json")
 		if (!getScene) {
 			log.errorNoStack(`Error get SceneExcelConfigData.json`)
@@ -570,7 +720,7 @@ class GI {
 					desc: {},
 					desc2: {},
 					icon: "", // TODO: add icon
-					typeScene: data.type
+					typeScene: getSceneTypeId(data.type)
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -578,7 +728,7 @@ class GI {
 					continue
 				}
 
-				// add name
+				// add name (TODO: find real name)
 				const name =
 					`${data.scriptData}` + (data.levelEntityConfig == "" ? "" : " (" + data.levelEntityConfig + ")")
 				obj.name = {
@@ -588,8 +738,10 @@ class GI {
 				//log.info("scene data:", obj)
 
 				// add to datebase
-				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Scene add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
+				var isAdd = await General.itemAdd(obj, rebuild, replace)
+				log.info(
+					`Scene add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+				)
 
 				//await sleep(5)
 			} else {
@@ -598,7 +750,7 @@ class GI {
 		}
 	}
 
-	async runWeapon(rebuild: boolean): Promise<void> {
+	async runWeapon(rebuild: boolean, replace: boolean): Promise<void> {
 		const getWeapon = this.excel.getConfig("WeaponExcelConfigData.json")
 		if (!getWeapon) {
 			log.errorNoStack(`Error get WeaponExcelConfigData.json`)
@@ -636,12 +788,25 @@ class GI {
 
 				// add name
 				obj.name = General.addMultiLangNamesAsObject(hash.toString(), LANG_GI, FOLDER_GI, obj.game)
+				if (Object.keys(obj.name).length === 0) {
+					log.warn(`skip weapon ${id}`)
+					continue
+				}
+				// add desc
+				obj.desc = General.addMultiLangNamesAsObject(
+					data.descTextMapHash.toString(),
+					LANG_GI,
+					FOLDER_GI,
+					obj.game
+				)
 
 				//log.info("weapon data:", obj)
 
 				// add to datebase
-				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Weapon add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
+				var isAdd = await General.itemAdd(obj, rebuild, replace)
+				log.info(
+					`Weapon add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+				)
 
 				//await sleep(5)
 			} else {
@@ -650,7 +815,7 @@ class GI {
 		}
 	}
 
-	async runMonster(rebuild: boolean): Promise<void> {
+	async runMonster(rebuild: boolean, replace: boolean): Promise<void> {
 		const getMonsterData = this.excel.getConfig("MonsterExcelConfigData.json")
 		if (!getMonsterData) {
 			log.errorNoStack(`Error get MonsterExcelConfigData.json`)
@@ -685,7 +850,7 @@ class GI {
 					desc: {},
 					desc2: {},
 					icon: "",
-					typeMonster: data.type
+					typeMonster: getMonsterType(data.type)
 				}
 
 				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -780,12 +945,19 @@ class GI {
 					}
 				}
 				obj.name = name_final
+				// if monster name is empty
+				if (Object.keys(obj.name).length === 0) {
+					log.warn(`skip monster ${id}`)
+					continue
+				}
 
 				//log.info("monster data:", obj)
 
 				// add to datebase
-				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Monster add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
+				var isAdd = await General.itemAdd(obj, rebuild, replace)
+				log.info(
+					`Monster add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+				)
 
 				//await sleep(5)
 			} else {
@@ -794,7 +966,7 @@ class GI {
 		}
 	}
 
-	async runItem(rebuild: boolean): Promise<void> {
+	async runItem(rebuild: boolean, replace: boolean): Promise<void> {
 		for (const [filePath, clazz] of Object.entries(EXCEL_GI)) {
 			if (clazz !== ClassItemExcelGI) continue
 
@@ -819,12 +991,12 @@ class GI {
 						desc2: {},
 						icon: "",
 						starType: data.rankLevel, // TODO: maybe need string?
-						itemType: data.itemType,
+						itemType: -1, //data.itemType,
 						// other
-						materialType: data.materialType,
-						foodQuality: data.foodQuality,
-						specialFurnitureType: data.specialFurnitureType,
-						surfaceType: data.surfaceType
+						materialType: -1, //data.materialType,
+						foodQuality: -1, //data.foodQuality,
+						specialFurnitureType: -1, //data.specialFurnitureType,
+						surfaceType: -1 //data.surfaceType
 					}
 
 					if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
@@ -846,6 +1018,11 @@ class GI {
 						FOLDER_GI,
 						obj.game
 					)
+					if (Object.keys(obj.name).length === 0) {
+						log.warn(`skip item ${id}`)
+						continue
+					}
+
 					// add desc
 					obj.desc = General.addMultiLangNamesAsObject(
 						data.descTextMapHash.toString(),
@@ -857,8 +1034,10 @@ class GI {
 					//log.info("item data:", obj)
 
 					// add to datebase
-					var isAdd = await General.itemAdd(obj, rebuild)
-					log.info(`Item add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
+					var isAdd = await General.itemAdd(obj, rebuild, replace)
+					log.info(
+						`Item add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+					)
 
 					//await sleep(5)
 				} else {
@@ -868,7 +1047,7 @@ class GI {
 		}
 	}
 
-	async runAvatar(rebuild: boolean): Promise<void> {
+	async runAvatar(rebuild: boolean, replace: boolean): Promise<void> {
 		log.info(`Try to update Avatar data`)
 		const getAvatar = this.excel.getConfig("AvatarExcelConfigData.json")
 		if (!getAvatar) {
@@ -946,6 +1125,11 @@ class GI {
 					FOLDER_GI,
 					obj.game
 				)
+				if (Object.keys(obj.name).length === 0) {
+					log.warn(`skip avatar ${id}`)
+					continue
+				}
+
 				// add desc
 				obj.desc = General.addMultiLangNamesAsObject(
 					data.descTextMapHash.toString(),
@@ -957,8 +1141,10 @@ class GI {
 				//log.info("Avatar data:", obj)
 
 				// add to datebase
-				var isAdd = await General.itemAdd(obj, rebuild)
-				log.info(`Avatar add > ${obj.id} is rebuild: ${rebuild} = db ${isAdd}`)
+				var isAdd = await General.itemAdd(obj, rebuild, replace)
+				log.info(
+					`Avatar add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+				)
 
 				//await sleep(5)
 			} else {

@@ -310,3 +310,31 @@ export function readJsonFileCached(filePath: string): Record<string, string> {
 	}
 	return textMapCache[filePath]
 }
+
+export function createEnum(keys: string[], nameFunc: string): string {
+	// derive PascalCase enum name from your getter name
+	const enumName = nameFunc.replace(/^get/, "").replace(/^[a-z]/, (c) => c.toUpperCase())
+
+	// build the enum entries
+	const entries = keys.map((k, i) => `  ${k} = ${i}`).join(",\n")
+
+	// pick a sensible default fallback (first key)
+	const defaultKey = keys[0]
+
+	// name of the reverse lookup fn
+	const numberFuncName = `${nameFunc}Number`
+
+	return `
+  enum ${enumName} {
+  ${entries}
+  }
+  
+  function ${nameFunc}(name: string): number {
+	return (${enumName} as any)[name] ?? -1;
+  }
+  
+  function ${numberFuncName}(id: number): string {
+	return ${enumName}[id] ?? "${defaultKey}";
+  }
+  `.trim()
+}

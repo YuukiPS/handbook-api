@@ -47,6 +47,12 @@ export class ClassAvatarExcelSR {
 		Object.assign(this, data)
 	}
 }
+export class ClassAvatarPropertyExcelSR {
+	[key: string]: AvatarPropertyExcelSR
+	constructor(data: Record<string, AvatarPropertyExcelSR>) {
+		Object.assign(this, data)
+	}
+}
 export class ClassAvatarSkillExcelGI {
 	[key: string]: AvatarSkillExcelConfigDataGI
 	constructor(data: Record<string, AvatarSkillExcelConfigDataGI>) {
@@ -137,9 +143,33 @@ export class ClassGadgetExcel {
 		Object.assign(this, data)
 	}
 }
-export class ClassReliquaryExcel {
-	[key: string]: ReliquaryExcel
-	constructor(data: Record<string, ReliquaryExcel>) {
+export class ClassMazePropExcelSR {
+	[key: string]: MazePropExcelSR
+	constructor(data: Record<string, MazePropExcelSR>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassRelicMainAffixExcelSR {
+	[key: string]: RelicMainAffixExcelSR
+	constructor(data: Record<string, RelicMainAffixExcelSR>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassRelicSubAffixExcelSR {
+	[key: string]: RelicSubAffixExcelSR
+	constructor(data: Record<string, RelicSubAffixExcelSR>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassReliquaryExcelGI {
+	[key: string]: ReliquaryExcelGI
+	constructor(data: Record<string, ReliquaryExcelGI>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassRelicExcelSR {
+	[key: string]: RelicExcelSR
+	constructor(data: Record<string, RelicExcelSR>) {
 		Object.assign(this, data)
 	}
 }
@@ -175,7 +205,7 @@ export class ClassQuestExcel {
 }
 
 // In Excel (Game Resource)
-export interface ReliquaryExcel {
+export interface ReliquaryExcelGI {
 	id: number
 	nameTextMapHash: number
 	descTextMapHash: number
@@ -185,6 +215,38 @@ export interface ReliquaryExcel {
 	mainPropDepotId: number
 	appendPropDepotId: number
 	rankLevel: number
+}
+export interface RelicMainAffixExcelSR {
+	GroupID: number
+	AffixID: number
+	Property: string
+	BaseValue: {
+		Value: number
+	}
+	LevelAdd: {
+		Value: number
+	}
+}
+export interface RelicSubAffixExcelSR {
+	GroupID: number
+	AffixID: number
+	Property: string
+	BaseValue: {
+		Value: number
+	}
+	StepValue: {
+		Value: number
+	}
+	StepNum: number
+}
+export interface RelicExcelSR {
+	ID: number
+	SetID: number
+	Type: string
+	Rarity: string
+	Mode: string
+	MainAffixGroup: number
+	SubAffixGroup: number
 }
 export interface ReliquaryMainPropExcel {
 	id: number
@@ -215,6 +277,15 @@ export interface GadgetExcel {
 	interactNameTextMapHash: number
 	type: string
 	jsonName: string
+}
+export interface MazePropExcelSR {
+	ID: number
+	PropName: HashObject
+	PropIconPath: string
+	PropType: string
+	PropStateList: string[]
+	JsonPath: string
+	ConfigEntityPath: string
 }
 export interface QuestExcel {
 	mainId: number
@@ -284,6 +355,13 @@ export interface AvatarExcelSR {
 	Rarity: string
 	DamageType: string
 }
+export interface AvatarPropertyExcelSR {
+	PropertyType: string
+	PropertyName: HashObject
+	PropertyNameRelic: HashObject
+	PropertyNameFilter: HashObject
+	IconPath: string
+}
 export interface EquipmentExcelSR {
 	EquipmentID: number
 	EquipmentName: HashObject
@@ -296,6 +374,7 @@ export interface EquipmentExcelSR {
 export interface WeaponExcel {
 	id: number
 	nameTextMapHash: number
+	descTextMapHash: number
 	icon: string
 	weaponType: string
 	rankLevel: number
@@ -393,17 +472,17 @@ export interface ItemNormal extends ItemData {
 	type: 2
 	// detail
 	starType?: number
-	itemType?: string
-	materialType?: string
-	foodQuality?: string
-	specialFurnitureType?: string
-	surfaceType?: string
+	itemType?: number // TODO: use enum with number
+	materialType?: number // TODO: use enum with number
+	foodQuality?: number // TODO: use enum with number
+	specialFurnitureType?: number // TODO: use enum with number
+	surfaceType?: number // TODO: use enum with number
 }
 export interface ItemMonster extends ItemData {
 	// always from type 3 for monster
 	type: 3
 	// detail
-	typeMonster?: string
+	typeMonster?: number
 }
 export interface ItemWeapon extends ItemData {
 	// always from type 4 for weapon
@@ -416,13 +495,13 @@ export interface ItemScene extends ItemData {
 	// always from type 5 for scene
 	type: 5
 	// detail
-	typeScene?: string
+	typeScene?: number
 }
 export interface ItemGadget extends ItemData {
 	// always from type 6 for gadget
 	type: 6
 	// detail
-	typeGadget?: string
+	typeGadget?: number
 }
 export interface ItemArtifactMain extends ItemData {
 	// always from type 7 for artifact main
@@ -440,10 +519,10 @@ export interface ItemArtifactConfig extends ItemData {
 	// always from type 9 for artifact config
 	type: 9
 	// detail
-	equipType?: string
-	mainPropDepotId?: number
-	appendPropDepotId?: number
-	rankLevel?: number
+	main?: number
+	sub?: number
+	starType?: number
+	equipType?: number
 }
 export interface ItemQuest extends ItemData {
 	// always from type 10 for quest
@@ -453,7 +532,7 @@ export interface ItemQuest extends ItemData {
 	subId?: number
 	stepDesc?: Record<string, string>
 	guideTips?: Record<string, string>
-	showType?: string
+	showType?: number
 	order?: number
 }
 export interface ItemPlane extends ItemData {
@@ -461,7 +540,7 @@ export interface ItemPlane extends ItemData {
 	type: 11
 	// detail
 	worldId?: number
-	planeType?: string
+	planeType?: number // TODO: use enum with number
 	startFloorId?: number
 	floorIdList?: number[]
 }
@@ -469,6 +548,6 @@ export interface ItemStage extends ItemData {
 	// always from type 12 for stage
 	type: 12
 	// detail
-	stageType?: string
+	stageType?: number // TODO: use enum with number
 	stageLevel?: number
 }
