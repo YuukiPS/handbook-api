@@ -13,6 +13,10 @@ export const _ = acfg({
 			url: "redis://:password@127.0.0.1:1234/0"
 		}
 	},
+	notification: {
+		id_channel: "",
+		token: ""
+	},
 	profile: [
 		{
 			name: "prod",

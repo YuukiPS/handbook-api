@@ -27,7 +27,7 @@ import {
 	ItemScene,
 	ItemWeapon
 } from "@UT/response"
-import { isEmpty } from "@UT/library"
+import { createEnum, isEmpty } from "@UT/library"
 import { domainPublic } from "@UT/share"
 import ExcelManager from "@UT/excel"
 // thrid party
@@ -36,6 +36,7 @@ import { isMainThread } from "worker_threads"
 import General from "@DB/book/general"
 
 const nameGame = "genshin-impact"
+const typeGame = 1
 
 const log = new Logger(nameGame.replace("-", " ").toLocaleUpperCase())
 
@@ -334,24 +335,37 @@ class GI {
 			return
 		}
 
+		var demoFastcheck = true
+
 		log.info(`Building item data`)
-		await this.runAvatar(foce_save, replace)
-		await this.runItem(foce_save, replace)
-		await this.runMonster(foce_save, replace)
-		await this.runWeapon(foce_save, replace)
-		await this.runScene(foce_save, replace)
-		await this.runGadget(foce_save, replace)
-		await this.runReliquary(foce_save, replace)
-		await this.runQuest(foce_save, replace)
+		await this.runAvatar(foce_save, replace, demoFastcheck)
+		await this.runItem(foce_save, replace, demoFastcheck)
+		await this.runMonster(foce_save, replace, demoFastcheck)
+		await this.runWeapon(foce_save, replace, demoFastcheck)
+		await this.runScene(foce_save, replace, demoFastcheck)
+		await this.runGadget(foce_save, replace, demoFastcheck)
+		await this.runReliquary(foce_save, replace, demoFastcheck)
+		await this.runQuest(foce_save, replace, demoFastcheck)
 	}
 
-	async runQuest(rebuild: boolean, replace: boolean): Promise<void> {
+	async runQuest(rebuild: boolean, replace: boolean, fastcheck: boolean): Promise<void> {
 		const getQuest = this.excel.getConfig("QuestExcelConfigData.json")
 		if (!getQuest) {
 			log.errorNoStack(`Error get QuestExcelConfigData.json`)
 			return
 		}
-		for (const data of Object.values(getQuest)) {
+		var typeClass = 10
+		var getItemDB = await General.getItemIds(typeClass, typeGame)
+		var filteredQuestData = Object.values(getQuest)
+		if (fastcheck) {
+			if (!rebuild) {
+				filteredQuestData = Object.values(getQuest).filter(
+					(data) => !getItemDB.includes(data.mainId) && !getItemDB.includes(data.subId)
+				)
+			}
+		}
+		log.warn(`Try update Quest ${filteredQuestData.length}x`)
+		for (const data of filteredQuestData) {
 			if (data) {
 				const idMain = data.mainId
 				const idSub = data.subId
@@ -360,8 +374,8 @@ class GI {
 				const hashGuide = data.guideTipsTextMapHash
 
 				const obj: ItemQuest = {
-					type: 10, // 10=quest
-					game: 1,
+					type: typeClass, // 10=quest
+					game: typeGame,
 					id: idMain,
 					subId: idSub,
 					name: {},
@@ -373,7 +387,7 @@ class GI {
 					order: data.order
 				}
 
-				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+				if (!fastcheck && !rebuild && (await General.itemExists(obj.id, obj.type), { subId: idSub })) {
 					log.info(`Quest already exists, skipping ${obj.id} (${obj.type})`)
 					continue
 				}
@@ -406,7 +420,7 @@ class GI {
 				// add to datebase
 				var isAdd = await General.itemAdd(obj, rebuild, replace)
 				log.info(
-					`Quest add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+					`Quest add > ${obj.id} (T${obj.type}/G${obj.game}) is RB${rebuild}/RE${replace}/F${fastcheck} > D${isAdd}`
 				)
 
 				//await sleep(5)
@@ -416,7 +430,7 @@ class GI {
 		}
 	}
 
-	async runReliquary(rebuild: boolean, replace: boolean): Promise<void> {
+	async runReliquary(rebuild: boolean, replace: boolean, fastcheck: boolean): Promise<void> {
 		// Lock basic stats (TODO: remove stats in name)
 		const maxLevel = 21
 		const maxRank = 5
@@ -448,8 +462,16 @@ class GI {
 		}
 
 		// Process Main Artifact
-		log.info(`Try to update Reliquary Main`)
-		for (const main of Object.values(getReliquaryMain)) {
+		var typeClass1 = 7
+		var getItemDB1 = await General.getItemIds(typeClass1, typeGame)
+		var filteredReliquary1 = Object.values(getReliquaryMain)
+		if (fastcheck) {
+			if (!rebuild) {
+				filteredReliquary1 = Object.values(getReliquaryMain).filter((data) => !getItemDB1.includes(data.id))
+			}
+		}
+		log.warn(`Try update Reliquary Main ${filteredReliquary1.length}x`)
+		for (const main of filteredReliquary1) {
 			const id = main.id
 			const getPropType = main.propType
 
@@ -460,8 +482,8 @@ class GI {
 			}
 
 			const obj: ItemArtifactMain = {
-				type: 7, // 7=ArtifactMain
-				game: 1,
+				type: typeClass1, // 7=ArtifactMain
+				game: typeGame,
 				id,
 				name: {},
 				desc: {},
@@ -469,30 +491,27 @@ class GI {
 				icon: "",
 				grup: main.propDepotId
 			}
-			if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+			if (!fastcheck && !rebuild && (await General.itemExists(obj.id, obj.type))) {
 				log.info(`ReliquaryMain already exists, skipping ${obj.id} (${obj.type})`)
 				continue
 			}
 
-			let valueMain = 0
 			const TesLevel = Object.values(getReliquaryLevel).find(
 				(entry) =>
 					entry.level === maxLevel &&
 					entry.rank === maxRank &&
 					entry.addProps.some((prop) => prop.propType === getPropType)
 			)
-
-			if (!TesLevel) {
-				// If no corresponding level configuration found, skip this entry.
-				continue
-			} else {
+			var bonusText = `(??? > R${maxRank}LV${maxLevel})`
+			if (TesLevel) {
 				const propFound = TesLevel.addProps.find((prop) => prop.propType === getPropType)
+				let valueMain = 0
 				if (propFound) {
 					valueMain = propFound.value
 				}
+				const bonus = Calculate(getPropType, valueMain)
+				bonusText = ` (${bonus} > R${maxRank}LV${maxLevel})`
 			}
-
-			const bonus = Calculate(getPropType, valueMain)
 
 			const mainPropHash = hashEntry.textMapContentTextMapHash
 			obj.name = General.addMultiLangNamesAsObject(
@@ -501,7 +520,7 @@ class GI {
 				FOLDER_GI,
 				obj.game,
 				"",
-				` (${bonus} > R${maxRank}LV${maxLevel})`
+				bonusText
 			)
 
 			//log.info("reliquary main:", obj)
@@ -509,13 +528,21 @@ class GI {
 			// add to datebase
 			var isAdd = await General.itemAdd(obj, rebuild, replace)
 			log.info(
-				`ReliquaryMain add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+				`ReliquaryMain add > ${obj.id} (T${obj.type}/G${obj.game}) is RB${rebuild}/RE${replace}/F${fastcheck} > D${isAdd}`
 			)
 		}
 
 		// Process Sub Artifact
-		log.info(`Try to update Reliquary Sub`)
-		for (const sub of Object.values(getReliquarySub)) {
+		var typeClass2 = 8
+		var getItemDB2 = await General.getItemIds(typeClass2, typeGame)
+		var filteredReliquary2 = Object.values(getReliquarySub)
+		if (fastcheck) {
+			if (!rebuild) {
+				filteredReliquary2 = Object.values(getReliquarySub).filter((data) => !getItemDB2.includes(data.id))
+			}
+		}
+		log.warn(`Try update Reliquary Sub ${filteredReliquary2.length}x`)
+		for (const sub of filteredReliquary2) {
 			const id = sub.id
 			const name = sub.propType
 
@@ -526,8 +553,8 @@ class GI {
 			}
 
 			const obj: ItemArtifactSub = {
-				type: 8, // 8=ArtifactSub
-				game: 1,
+				type: typeClass2, // 8=ArtifactSub
+				game: typeGame,
 				id,
 				name: {},
 				desc: {},
@@ -536,7 +563,7 @@ class GI {
 				grup: sub.depotId
 			}
 
-			if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+			if (!fastcheck && !rebuild && (await General.itemExists(obj.id, obj.type))) {
 				log.info(`ReliquarySub already exists, skipping ${obj.id} (${obj.type})`)
 				continue
 			}
@@ -558,13 +585,21 @@ class GI {
 			// add to datebase
 			var isAdd = await General.itemAdd(obj, rebuild, replace)
 			log.info(
-				`ReliquarySub add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+				`ReliquarySub add > ${obj.id} (T${obj.type}/G${obj.game}) is RB${rebuild}/RE${replace}/F${fastcheck} > D${isAdd}`
 			)
 		}
 
 		// Process Artifact (Item)
-		log.info(`Try to update Reliquary Config`)
-		for (const item of Object.values(getReliquaryConfig)) {
+		var typeClass3 = 9
+		var getItemDB3 = await General.getItemIds(typeClass3, typeGame)
+		var filteredReliquary3 = Object.values(getReliquaryConfig)
+		if (fastcheck) {
+			if (!rebuild) {
+				filteredReliquary3 = Object.values(getReliquaryConfig).filter((data) => !getItemDB3.includes(data.id))
+			}
+		}
+		log.warn(`Try update Reliquary Config ${filteredReliquary3.length}x`)
+		for (const item of filteredReliquary3) {
 			const nameItemHash = item.nameTextMapHash
 			const descriptionItemHash = item.descTextMapHash
 			const id = item.id
@@ -580,8 +615,8 @@ class GI {
 			const nameIndexHash = hashEntry.textMapContentTextMapHash
 
 			const obj: ItemArtifactConfig = {
-				type: 9, // 9=ArtifactConfig
-				game: 1,
+				type: typeClass3, // 9=ArtifactConfig
+				game: typeGame,
 				id,
 				name: {},
 				desc: {},
@@ -592,7 +627,7 @@ class GI {
 				starType: rank,
 				equipType: getEquipType(item.equipType)
 			}
-			if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+			if (!fastcheck && !rebuild && (await General.itemExists(obj.id, obj.type))) {
 				log.info(`ReliquaryConfig already exists, skipping ${obj.id} (${obj.type})`)
 				continue
 			}
@@ -635,25 +670,36 @@ class GI {
 			// add to datebase
 			var isAdd = await General.itemAdd(obj, rebuild, replace)
 			log.info(
-				`ReliquaryConfig add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+				`ReliquaryConfig add > ${obj.id} (T${obj.type}/G${obj.game}) is RB${rebuild}/RE${replace}/F${fastcheck} > D${isAdd}`
 			)
 		}
 	}
 
-	async runGadget(rebuild: boolean, replace: boolean): Promise<void> {
+	async runGadget(rebuild: boolean, replace: boolean, fastcheck: boolean): Promise<void> {
 		const getGadget = this.excel.getConfig("GadgetExcelConfigData.json")
 		if (!getGadget) {
 			log.errorNoStack(`Error get GadgetExcelConfigData.json`)
 			return
 		}
-		for (const data of Object.values(getGadget)) {
+
+		var typeClass = 6
+		var getItemDB = await General.getItemIds(typeClass, typeGame)
+		var filteredGadgetData = Object.values(getGadget)
+		if (fastcheck) {
+			if (!rebuild) {
+				filteredGadgetData = Object.values(getGadget).filter((data) => !getItemDB.includes(data.id))
+			}
+		}
+		log.warn(`Try update Gadget ${filteredGadgetData.length}x`)
+
+		for (const data of filteredGadgetData) {
 			if (data && data.id) {
 				const id = data.id
 				const nameJson = data.jsonName
 
 				const obj: ItemGadget = {
-					type: 6, // 6=gadget
-					game: 1,
+					type: typeClass, // 6=gadget
+					game: typeGame,
 					id,
 					name: {},
 					desc: {},
@@ -662,7 +708,7 @@ class GI {
 					typeGadget: getEntityTypeId(data.type)
 				}
 
-				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+				if (!fastcheck && !rebuild && (await General.itemExists(obj.id, obj.type))) {
 					log.info(`Gadget already exists, skipping ${obj.id} (${obj.type})`)
 					continue
 				}
@@ -692,7 +738,7 @@ class GI {
 				// add to datebase
 				var isAdd = await General.itemAdd(obj, rebuild, replace)
 				log.info(
-					`Gadget add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+					`Gadget add > ${obj.id} (T${obj.type}/G${obj.game}) is RB${rebuild}/RE${replace}/F${fastcheck} > D${isAdd}`
 				)
 
 				//await sleep(5)
@@ -702,19 +748,30 @@ class GI {
 		}
 	}
 
-	async runScene(rebuild: boolean, replace: boolean): Promise<void> {
+	async runScene(rebuild: boolean, replace: boolean, fastcheck: boolean): Promise<void> {
 		const getScene = this.excel.getConfig("SceneExcelConfigData.json")
 		if (!getScene) {
 			log.errorNoStack(`Error get SceneExcelConfigData.json`)
 			return
 		}
-		for (const data of Object.values(getScene)) {
+
+		var typeClass = 5
+		var getItemDB = await General.getItemIds(typeClass, typeGame)
+		var filteredSceneData = Object.values(getScene)
+		if (fastcheck) {
+			if (!rebuild) {
+				filteredSceneData = Object.values(getScene).filter((data) => !getItemDB.includes(data.id))
+			}
+		}
+		log.warn(`Try update Scene ${filteredSceneData.length}x`)
+
+		for (const data of filteredSceneData) {
 			if (data && data.id) {
 				const id = data.id
 
 				const obj: ItemScene = {
-					type: 5, // 5=scene
-					game: 1,
+					type: typeClass, // 5=scene
+					game: typeGame,
 					id,
 					name: {},
 					desc: {},
@@ -723,7 +780,7 @@ class GI {
 					typeScene: getSceneTypeId(data.type)
 				}
 
-				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+				if (!fastcheck && !rebuild && (await General.itemExists(obj.id, obj.type))) {
 					log.info(`Scene already exists, skipping ${obj.id} (${obj.type})`)
 					continue
 				}
@@ -740,7 +797,7 @@ class GI {
 				// add to datebase
 				var isAdd = await General.itemAdd(obj, rebuild, replace)
 				log.info(
-					`Scene add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+					`Scene add > ${obj.id} (T${obj.type}/G${obj.game}) is RB${rebuild}/RE${replace}/F${fastcheck} > D${isAdd}`
 				)
 
 				//await sleep(5)
@@ -750,21 +807,32 @@ class GI {
 		}
 	}
 
-	async runWeapon(rebuild: boolean, replace: boolean): Promise<void> {
+	async runWeapon(rebuild: boolean, replace: boolean, fastcheck: boolean): Promise<void> {
 		const getWeapon = this.excel.getConfig("WeaponExcelConfigData.json")
 		if (!getWeapon) {
 			log.errorNoStack(`Error get WeaponExcelConfigData.json`)
 			return
 		}
-		for (const data of Object.values(getWeapon)) {
+
+		var typeClass = 4
+		var getItemDB = await General.getItemIds(typeClass, typeGame)
+		var filteredWeaponData = Object.values(getWeapon)
+		if (fastcheck) {
+			if (!rebuild) {
+				filteredWeaponData = Object.values(getWeapon).filter((data) => !getItemDB.includes(data.id))
+			}
+		}
+		log.warn(`Try update Weapon ${filteredWeaponData.length}x`)
+
+		for (const data of filteredWeaponData) {
 			if (data && data.nameTextMapHash) {
 				const hash = data.nameTextMapHash
 				const id = data.id
 				const iconName = data.icon
 
 				const obj: ItemWeapon = {
-					type: 4, // 4=weapon
-					game: 1,
+					type: typeClass, // 4=weapon
+					game: typeGame,
 					id,
 					name: {},
 					desc: {},
@@ -774,7 +842,7 @@ class GI {
 					weaponType: getWeaponTypeNumber(data.weaponType)
 				}
 
-				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+				if (!fastcheck && !rebuild && (await General.itemExists(obj.id, obj.type))) {
 					log.info(`Weapon already exists, skipping ${obj.id} (${obj.type})`)
 					continue
 				}
@@ -805,7 +873,7 @@ class GI {
 				// add to datebase
 				var isAdd = await General.itemAdd(obj, rebuild, replace)
 				log.info(
-					`Weapon add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+					`Weapon add > ${obj.id} (T${obj.type}/G${obj.game}) is RB${rebuild}/RE${replace}/F${fastcheck} > D${isAdd}`
 				)
 
 				//await sleep(5)
@@ -815,7 +883,7 @@ class GI {
 		}
 	}
 
-	async runMonster(rebuild: boolean, replace: boolean): Promise<void> {
+	async runMonster(rebuild: boolean, replace: boolean, fastcheck: boolean): Promise<void> {
 		const getMonsterData = this.excel.getConfig("MonsterExcelConfigData.json")
 		if (!getMonsterData) {
 			log.errorNoStack(`Error get MonsterExcelConfigData.json`)
@@ -832,7 +900,17 @@ class GI {
 			return
 		}
 
-		for (const data of Object.values(getMonsterData)) {
+		var typeClass = 3
+		var getItemDB = await General.getItemIds(typeClass, typeGame)
+		var filteredMonsterData = Object.values(getMonsterData)
+		if (fastcheck) {
+			if (!rebuild) {
+				filteredMonsterData = Object.values(getMonsterData).filter((data) => !getItemDB.includes(data.id))
+			}
+		}
+		log.warn(`Try update Monster ${filteredMonsterData.length}x`)
+
+		for (const data of filteredMonsterData) {
 			if (data && data.nameTextMapHash) {
 				var hashName1 = data.nameTextMapHash
 				const id = data.id
@@ -843,8 +921,8 @@ class GI {
 				const varDP = data.describeId
 
 				const obj: ItemMonster = {
-					type: 3, // 3=monster
-					game: 1,
+					type: typeClass, // 3=monster
+					game: typeGame,
 					id,
 					name: {},
 					desc: {},
@@ -853,7 +931,7 @@ class GI {
 					typeMonster: getMonsterType(data.type)
 				}
 
-				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+				if ((await General.itemExists(obj.id, obj.type))) {
 					log.info(`Monster already exists, skipping ${obj.id} (${obj.type})`)
 					continue
 				}
@@ -956,7 +1034,7 @@ class GI {
 				// add to datebase
 				var isAdd = await General.itemAdd(obj, rebuild, replace)
 				log.info(
-					`Monster add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+					`Monster add > ${obj.id} (T${obj.type}/G${obj.game}) is RB${rebuild}/RE${replace}/F${fastcheck} > D${isAdd}`
 				)
 
 				//await sleep(5)
@@ -966,31 +1044,46 @@ class GI {
 		}
 	}
 
-	async runItem(rebuild: boolean, replace: boolean): Promise<void> {
+	async runItem(rebuild: boolean, replace: boolean, fastcheck: boolean): Promise<void> {
+		var typeClass = 2
+		var getItemDB = await General.getItemIds(typeClass, typeGame)
+
+		//var enumTes1: string[] = []
+		//var enumTes2: string[] = []
+		//var enumTes3: string[] = []
+
 		for (const [filePath, clazz] of Object.entries(EXCEL_GI)) {
 			if (clazz !== ClassItemExcelGI) continue
 
-			log.info(`Try to update ${filePath} data`)
+			//log.info(`Try to update ${filePath} data`)
 			const getItem = this.excel.getConfig(filePath as keyof typeof EXCEL_GI) as ClassItemExcelGI
 			if (!getItem) {
 				log.errorNoStack(`Error get ${filePath}`)
 				return
 			}
 
-			for (const data of Object.values(getItem)) {
+			var filteredItems = Object.values(getItem)
+			if (fastcheck) {
+				if (!rebuild) {
+					filteredItems = Object.values(getItem).filter((data) => !getItemDB.includes(data.id))
+				}
+			}
+			log.warn(`Try update Item ${filePath} ${filteredItems.length}x`)
+
+			for (const data of filteredItems) {
 				if (data && data.nameTextMapHash) {
 					const id = data.id
 					const iconName = data.icon
 
 					const obj: ItemNormal = {
-						type: 2, // 2=normal item
-						game: 1,
+						type: typeClass, // 2=normal item
+						game: typeGame,
 						id,
 						name: {},
 						desc: {},
 						desc2: {},
 						icon: "",
-						starType: data.rankLevel, // TODO: maybe need string?
+						starType: data.rankLevel,
 						itemType: -1, //data.itemType,
 						// other
 						materialType: -1, //data.materialType,
@@ -999,7 +1092,19 @@ class GI {
 						surfaceType: -1 //data.surfaceType
 					}
 
-					if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+					/*
+					if (!enumTes1.includes(data.itemType)) {
+						enumTes1.push(data.itemType)
+					}
+					if (!enumTes2.includes(data.materialType)) {
+						enumTes2.push(data.materialType)
+					}
+					if (!enumTes3.includes(data.foodQuality)) {
+						enumTes3.push(data.foodQuality)
+					}
+					*/
+
+					if (!fastcheck && !rebuild && (await General.itemExists(obj.id, obj.type))) {
 						log.info(`Item already exists, skipping ${obj.id} (${obj.type})`)
 						continue
 					}
@@ -1036,7 +1141,7 @@ class GI {
 					// add to datebase
 					var isAdd = await General.itemAdd(obj, rebuild, replace)
 					log.info(
-						`Item add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+						`Item add > ${obj.id} (T${obj.type}/G${obj.game}) is RB${rebuild}/RE${replace}/F${fastcheck} > D${isAdd}`
 					)
 
 					//await sleep(5)
@@ -1045,10 +1150,13 @@ class GI {
 				}
 			}
 		}
+
+		//log.info(`tes1:`, createEnum(enumTes1, "getItemType"))
+		//log.info(`tes2:`, createEnum(enumTes2, "getMaterialType"))
+		//log.info(`tes3:`, createEnum(enumTes3, "getFoodQuality"))
 	}
 
-	async runAvatar(rebuild: boolean, replace: boolean): Promise<void> {
-		log.info(`Try to update Avatar data`)
+	async runAvatar(rebuild: boolean, replace: boolean, fastcheck: boolean): Promise<void> {
 		const getAvatar = this.excel.getConfig("AvatarExcelConfigData.json")
 		if (!getAvatar) {
 			log.errorNoStack(`Error get AvatarExcelConfigData.json`)
@@ -1064,7 +1172,18 @@ class GI {
 			log.errorNoStack(`Error get AvatarSkillExcelConfigData.json`)
 			return
 		}
-		for (const data of Object.values(getAvatar)) {
+
+		var typeClass = 1
+		var getItemDB = await General.getItemIds(typeClass, typeGame)
+		var filteredAvatars = Object.values(getAvatar)
+		if (fastcheck) {
+			if (!rebuild) {
+				filteredAvatars = Object.values(getAvatar).filter((data) => !getItemDB.includes(data.id))
+			}
+		}
+		log.warn(`Try update Avatar ${filteredAvatars.length}x`)
+
+		for (const data of filteredAvatars) {
 			if (data && data.nameTextMapHash) {
 				const id = data.id
 				const iconName = data.iconName
@@ -1093,8 +1212,8 @@ class GI {
 				*/
 
 				const obj: ItemAvatar = {
-					type: 1, // 1=avatar
-					game: 1,
+					type: typeClass, // 1=avatar
+					game: typeGame,
 					id,
 					name: {},
 					desc: {},
@@ -1106,7 +1225,7 @@ class GI {
 					bodyType: -1 // TODO: get better bodyType
 				}
 
-				if (!rebuild && (await General.itemExists(obj.id, obj.type))) {
+				if (!fastcheck && !rebuild && (await General.itemExists(obj.id, obj.type))) {
 					log.info(`Avatar already exists, skipping ${obj.id} (${obj.type})`)
 					continue
 				}
@@ -1143,7 +1262,7 @@ class GI {
 				// add to datebase
 				var isAdd = await General.itemAdd(obj, rebuild, replace)
 				log.info(
-					`Avatar add > ${obj.id} (T${obj.type}-G${obj.game}) is rebuild: ${rebuild} and replace ${replace} = db ${isAdd}`
+					`Avatar add > ${obj.id} (T${obj.type}/G${obj.game}) is RB${rebuild}/RE${replace}/F${fastcheck} > D${isAdd}`
 				)
 
 				//await sleep(5)

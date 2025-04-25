@@ -55,7 +55,7 @@ class Update {
 	) {
 		// GI - https://gitlab.com/Dimbreath/AnimeGameData
 		// SR - https://gitlab.com/Dimbreath/turnbasedgamedata
-		//await BOOK_GI.Update(skip_update, rebuild, dont_build, replace)
+		await BOOK_GI.Update(skip_update, rebuild, dont_build, replace)
 		await BOOK_SR.Update(skip_update, rebuild, dont_build, replace)
 	}
 }

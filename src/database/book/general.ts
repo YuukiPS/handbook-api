@@ -16,6 +16,7 @@ import fs from "fs/promises"
 // datebase
 import DBMongo from "@DB/client/mongo"
 import { Filter, OptionalUnlessRequiredId } from "mongodb"
+import config from "@UT/config"
 
 const log = new Logger("General")
 
@@ -158,6 +159,20 @@ export const _ = {
 			}
 		}
 	},
+	getItemIds: async function (type: number, game: number, filter: Partial<ItemData> = {}): Promise<number[]> {
+		await DBMongo.isConnected()
+		const collection = DBMongo.getCollection<ItemData>("book")
+		if (!collection) {
+			log.errorNoStack("api_db_nofound_collection_book")
+			return []
+		}
+
+		// build your query: must match both type AND game, plus any extra filters
+		const query = { type, game, ...filter }
+
+		// return distinct "id" values matching that query
+		return (await collection.distinct("id", query)).map((id) => Number(id))
+	},
 	/**
 	 * Check for existence of a document matching {id, type, …extraFilters}.
 	 *
@@ -188,7 +203,7 @@ export const _ = {
 		obj: T,
 		rebuild: boolean = false,
 		replace: boolean = false,
-		extraFilter: Omit<Partial<T>, "id" | "type"> = {} as Omit<Partial<T>, "id" | "type">
+		extraFilter: Omit<Partial<T>, "id" | "type" | "game"> = {} as Omit<Partial<T>, "id" | "type" | "game">
 	): Promise<boolean> {
 		await DBMongo.isConnected()
 		const collection = DBMongo.getCollection<T>("book")
@@ -197,8 +212,9 @@ export const _ = {
 			return false
 		}
 
-		const { id, type } = obj
-		const query = { id, type, ...extraFilter } as Partial<T>
+		const { id, type, game } = obj
+		// now matching on id, type AND game, plus any extraFilter fields
+		const query = { id, type, game, ...extraFilter } as Partial<T>
 
 		if (rebuild) {
 			if (replace) {
@@ -335,12 +351,15 @@ export const _ = {
 			const latestCommit = response.data[0]
 
 			log.info(`Latest commit for ${saveDB} > ${latestCommit.id} (${latestCommit.committed_date})`)
-
 			var getLast = await this.getProp(saveDB)
 			if (getLast.data != null) {
 				if (latestCommit.id !== getLast.data.value) {
 					log.info("New update is available!")
-					// TODO: send notification to user
+					if (!isEmpty(config.notification.token)) {
+						this.postDiscord(config.notification, `new update res ${name} > ${latestCommit.id}`)
+					} else {
+						log.warn(`skip notif update, no token is found`)
+					}
 					this.updateProp(saveDB, latestCommit.id, "update")
 					return true
 				} else {
@@ -452,6 +471,48 @@ export const _ = {
 				retcode: -2,
 				data: null
 			}
+		}
+	},
+	async postDiscord(
+		connect: {
+			id_channel: string
+			token: string
+		},
+		content: string | null = null,
+		embed: {
+			url?: string
+			title?: string
+			description?: string
+			color?: number // Optional color in decimal format
+			image?: { url: string } // Optional image URL
+			thumbnail?: { url: string } // Optional thumbnail URL
+			fields?: { name: string; value: string; inline?: boolean }[] // Optional fields
+			footer?: { text: string; icon_url?: string } // Optional footer
+		} | null = null
+	): Promise<void> {
+		try {
+			const data: any = {}
+			if (content) data.content = content
+			if (embed) data.embeds = [embed]
+
+			const response = await axios.post(
+				`https://canary.discord.com/api/webhooks/${connect.id_channel}/${connect.token}`,
+				data,
+				{
+					headers: {
+						"Content-Type": "application/json"
+					},
+					timeout: 5000
+				}
+			)
+
+			if (response.status === 204) {
+				log.info("Message sent to Discord successfully.")
+			} else {
+				log.errorNoStack("Unexpected response:", response.data)
+			}
+		} catch (error) {
+			log.error("Error sending message to Discord:", error)
 		}
 	}
 }

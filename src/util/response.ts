@@ -460,7 +460,7 @@ export interface ItemData {
 }
 export interface ItemAvatar extends ItemData {
 	// always from type 1 for avatar
-	type: 1
+	//type: 1
 	// detail
 	weaponType?: number
 	elementType?: number
@@ -469,7 +469,7 @@ export interface ItemAvatar extends ItemData {
 }
 export interface ItemNormal extends ItemData {
 	// always from type 2 for normal item
-	type: 2
+	//type: 2
 	// detail
 	starType?: number
 	itemType?: number // TODO: use enum with number
@@ -480,44 +480,44 @@ export interface ItemNormal extends ItemData {
 }
 export interface ItemMonster extends ItemData {
 	// always from type 3 for monster
-	type: 3
+	//type: 3
 	// detail
 	typeMonster?: number
 }
 export interface ItemWeapon extends ItemData {
 	// always from type 4 for weapon
-	type: 4
+	//type: 4
 	// detail
 	weaponType?: number
 	starType?: number
 }
 export interface ItemScene extends ItemData {
 	// always from type 5 for scene
-	type: 5
+	//type: 5
 	// detail
 	typeScene?: number
 }
 export interface ItemGadget extends ItemData {
 	// always from type 6 for gadget
-	type: 6
+	//type: 6
 	// detail
 	typeGadget?: number
 }
 export interface ItemArtifactMain extends ItemData {
 	// always from type 7 for artifact main
-	type: 7
+	//type: 7
 	// detail
 	grup?: number
 }
 export interface ItemArtifactSub extends ItemData {
 	// always from type 8 for artifact sub
-	type: 8
+	//type: 8
 	// detail
 	grup?: number
 }
 export interface ItemArtifactConfig extends ItemData {
 	// always from type 9 for artifact config
-	type: 9
+	//type: 9
 	// detail
 	main?: number
 	sub?: number
@@ -526,7 +526,7 @@ export interface ItemArtifactConfig extends ItemData {
 }
 export interface ItemQuest extends ItemData {
 	// always from type 10 for quest
-	type: 10
+	//type: 10
 	// detail
 	//mainId?: number
 	subId?: number
@@ -537,7 +537,7 @@ export interface ItemQuest extends ItemData {
 }
 export interface ItemPlane extends ItemData {
 	// always from type 11 for plane
-	type: 11
+	//type: 11
 	// detail
 	worldId?: number
 	planeType?: number // TODO: use enum with number
@@ -546,7 +546,7 @@ export interface ItemPlane extends ItemData {
 }
 export interface ItemStage extends ItemData {
 	// always from type 12 for stage
-	type: 12
+	//type: 12
 	// detail
 	stageType?: number // TODO: use enum with number
 	stageLevel?: number
