@@ -21,7 +21,7 @@ import config from "@UT/config"
 const log = new Logger("General")
 
 export const _ = {
-	getItem: async function (options?: {
+	findItem: async function (options?: {
 		search?: string
 		type?: number
 		game?: number
@@ -38,13 +38,15 @@ export const _ = {
 
 			const { search, type, game, lang = "EN", limit = 10, page = 1 } = options || {}
 
+			var setlang = lang.toUpperCase()
+
 			// build filter
 			const query: any = {}
-			if (search) query[`name.${lang}`] = { $regex: search, $options: "i" }
+			if (search) query[`name.${setlang}`] = { $regex: search, $options: "i" }
 			if (!isEmpty(type)) query.type = type
 			if (!isEmpty(game)) query.game = game
 
-			log.info(`query: ${limit} limit > `, query)
+			log.debug(`query: ${limit} limit > `, query)
 
 			// compute skip
 			const skip = (page - 1) * limit
@@ -63,8 +65,8 @@ export const _ = {
 					$addFields: {
 						name: {
 							$cond: {
-								if: { $ifNull: [`$name.${lang}`, false] },
-								then: `$name.${lang}`,
+								if: { $ifNull: [`$name.${setlang}`, false] },
+								then: `$name.${setlang}`,
 								else: {
 									$cond: {
 										if: { $ifNull: ["$name.EN", false] },
@@ -83,8 +85,8 @@ export const _ = {
 						},
 						desc: {
 							$cond: {
-								if: { $ifNull: [`$desc.${lang}`, false] },
-								then: `$desc.${lang}`,
+								if: { $ifNull: [`$desc.${setlang}`, false] },
+								then: `$desc.${setlang}`,
 								else: {
 									$cond: {
 										if: { $ifNull: ["$desc.EN", false] },
@@ -103,8 +105,8 @@ export const _ = {
 						},
 						desc2: {
 							$cond: {
-								if: { $ifNull: [`$desc2.${lang}`, false] },
-								then: `$desc2.${lang}`,
+								if: { $ifNull: [`$desc2.${setlang}`, false] },
+								then: `$desc2.${setlang}`,
 								else: {
 									$cond: {
 										if: { $ifNull: ["$desc2.EN", false] },
@@ -195,6 +197,123 @@ export const _ = {
 		const existingDoc = await collection.findOne(query)
 		return existingDoc !== null
 	},
+	getItem: async function (
+		id: number,
+		type: number,
+		game?: number,
+		lang: string = "EN",
+		filter: Partial<ItemData> = {}
+	): Promise<any> {
+		await DBMongo.isConnected()
+		const collection = DBMongo.getCollection<ItemData>("book")
+		if (!collection) {
+			log.errorNoStack("api_db_nofound_collection_book")
+			return false
+		}
+
+		var setlang = lang.toUpperCase()
+
+		// 1) build your match stage
+		const match: any = { id, type, ...filter }
+		if (game !== undefined) {
+			match.game = game
+		}
+
+		// 2) assemble pipeline
+		const pipeline: any[] = [
+			{ $match: match },
+			{
+				$addFields: {
+					name: {
+						$cond: {
+							if: { $ifNull: [`$name.${setlang}`, false] },
+							then: `$name.${setlang}`,
+							else: {
+								$cond: {
+									if: { $ifNull: ["$name.EN", false] },
+									then: "$name.EN",
+									else: {
+										$let: {
+											vars: {
+												firstKeyValue: {
+													$arrayElemAt: [{ $objectToArray: "$name" }, 0]
+												}
+											},
+											in: "$$firstKeyValue.v"
+										}
+									}
+								}
+							}
+						}
+					},
+					desc: {
+						$cond: {
+							if: { $ifNull: [`$desc.${setlang}`, false] },
+							then: `$desc.${setlang}`,
+							else: {
+								$cond: {
+									if: { $ifNull: ["$desc.EN", false] },
+									then: "$desc.EN",
+									else: {
+										$let: {
+											vars: {
+												firstKeyValue: {
+													$arrayElemAt: [{ $objectToArray: "$desc" }, 0]
+												}
+											},
+											in: "$$firstKeyValue.v"
+										}
+									}
+								}
+							}
+						}
+					},
+					desc2: {
+						$cond: {
+							if: { $ifNull: [`$desc2.${setlang}`, false] },
+							then: `$desc2.${setlang}`,
+							else: {
+								$cond: {
+									if: { $ifNull: ["$desc2.EN", false] },
+									then: "$desc2.EN",
+									else: {
+										$let: {
+											vars: {
+												firstKeyValue: {
+													$arrayElemAt: [{ $objectToArray: "$desc2" }, 0]
+												}
+											},
+											in: "$$firstKeyValue.v"
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			{ $project: { _id: 0 } },
+			{ $limit: 1 }
+		]
+
+		// 3) run it and grab the first result
+		const [item] = await collection.aggregate(pipeline).toArray()
+
+		// 4) return a uniform “not found” or the item
+		if (!item) {
+			return {
+				message: "api_db_book_notfound",
+				retcode: -1,
+				data: null
+			}
+		}
+
+		return {
+			message: "api_db_book_get_success",
+			retcode: 0,
+			data: item
+		}
+	},
 	/**
 	 * Add or update a document in `book`, matching on {id, type, …extraFilter}.
 	 * obj must include at least id/type, and any other fields are stored in the doc.
@@ -263,6 +382,37 @@ export const _ = {
 			names["EN"] = nameIfNotFound //|| `UNK-${hash}`
 		}
 		return names
+	},
+	findNameHash: function (
+		hash: string,
+		lang: string,
+		langList: string[],
+		folderPath: string = "",
+		type: number = 0, // 1=genshin, 2=starrail (unused here but kept for parity)
+		nameIfNotFound: string = "",
+		addNameCustom: string = "",
+		nameSR: string = ""
+	): string {
+		// build the order of langs to try
+		const tryLangs = [lang, ...langList.filter((l) => l !== lang)]
+		for (const l of tryLangs) {
+			const fullPath = `${folderPath}/TextMap/TextMap${l}.json`
+			const textMap = readJsonFileCached(fullPath)
+			const entry = textMap[hash]
+
+			if (!isEmpty(entry)) {
+				// replace placeholder and append any custom suffix
+				const replaced = entry.replace("{NICKNAME}", `Trailblazer ${nameSR}`)
+				return replaced + addNameCustom
+			}
+		}
+
+		// nothing found in any language
+		if (!isEmpty(nameIfNotFound)) {
+			return nameIfNotFound
+		}
+		// last-resort “unknown” marker
+		return `UNK-${hash}`
 	},
 	downloadImageOrCopyLocal: async function (
 		sourceUrlorLocal: string, // local file/url dump (private)

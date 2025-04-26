@@ -247,6 +247,7 @@ export interface RelicExcelSR {
 	Mode: string
 	MainAffixGroup: number
 	SubAffixGroup: number
+	MaxLevel: number
 }
 export interface ReliquaryMainPropExcel {
 	id: number
@@ -550,4 +551,28 @@ export interface ItemStage extends ItemData {
 	// detail
 	stageType?: number // TODO: use enum with number
 	stageLevel?: number
+}
+
+// API SR only
+export interface GenRelicResult {
+	id: number
+	count: number
+	level: number
+	main: string
+	sub: string[]
+}
+export interface BuildRelicData {
+	owner: number
+	title: string
+	avatar: number
+	lightcone: number
+	vote: number
+	time: number
+	cmd?: string[]
+	preview?: GenRelicResult[]
+}
+export interface BuildRelicRsp {
+	message: string
+	retcode: number
+	data: BuildRelicData[] | null
 }

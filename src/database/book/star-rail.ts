@@ -1,5 +1,7 @@
 import Logger from "@UT/logger"
 import {
+	BuildRelicData,
+	BuildRelicRsp,
 	ClassAvatarExcelSR,
 	ClassAvatarPropertyExcelSR,
 	ClassEquipmentExcelSR,
@@ -12,6 +14,7 @@ import {
 	ClassRelicMainAffixExcelSR,
 	ClassRelicSubAffixExcelSR,
 	ClassStageConfigExcelSR,
+	GenRelicResult,
 	ItemArtifactConfig,
 	ItemArtifactMain,
 	ItemArtifactSub,
@@ -28,9 +31,10 @@ import { domainPublic } from "@UT/share"
 import ExcelManager from "@UT/excel"
 // thrid party
 import { isMainThread } from "worker_threads"
-// datebase
-import General from "@DB/book/general"
 import path from "path"
+// datebase
+import DBMongo from "@DB/client/mongo"
+import General from "@DB/book/general"
 
 const nameGame = "star-rail"
 const typeGame = 2
@@ -265,6 +269,183 @@ class SR {
 		}
 	}
 		*/
+	async addRelicBuild(obj: BuildRelicData): Promise<boolean> {
+		await DBMongo.isConnected()
+		const collection = DBMongo.getCollection<BuildRelicData>("build_relic")
+		if (!collection) {
+			log.errorNoStack("api_db_nofound_collection_buildrelic")
+			return false
+		}
+
+		await collection.insertOne(obj as Required<BuildRelicData>)
+		return true
+	}
+
+	async findRelicBuild(
+		options: {
+			search?: string // filter by title (case-insensitive, partial match)
+			avatar?: number // filter by avatar ID
+			limit?: number // items per page (default: 10)
+			page?: number // page number (default: 1)
+			sort?: "vote" | "time" // sort field (default: 'time')
+		} = {}
+	): Promise<BuildRelicRsp> {
+		await DBMongo.isConnected()
+		const collection = DBMongo.getCollection<BuildRelicData>("build_relic")
+		if (!collection) {
+			log.errorNoStack("api_db_nofound_collection_buildrelic")
+			return {
+				message: 'Collection "build_relic" not found',
+				retcode: 500,
+				data: null
+			}
+		}
+
+		// Destructure with defaults
+		const { search, avatar, limit = 10, page = 1, sort = "time" } = options
+
+		// Build Mongo filter
+		const filter: Record<string, any> = {}
+
+		if (!isEmpty(search)) filter.title = { $regex: search, $options: "i" }
+		if (!isEmpty(avatar)) filter.avatar = avatar
+
+		// Compute skip for pagination
+		const skip = (page - 1) * limit
+
+		// Build sort object
+		const sortObj: Record<string, -1> = sort === "vote" ? { vote: -1 } : { time: -1 }
+
+		// Execute query
+		const cursor = collection.find(filter).sort(sortObj).skip(skip).limit(limit)
+
+		const results = await cursor.toArray()
+		for (var item of results) {
+			item.preview = await this.generatePreview(item.cmd)
+		}
+
+		return {
+			message: "success",
+			retcode: 0,
+			data: results
+		}
+	}
+
+	async generatePreview(cmds?: string[]): Promise<GenRelicResult[] | undefined> {
+		if (!cmds || cmds.length === 0) return undefined
+
+		const results = await Promise.all(
+			cmds.map(async (cmd) => {
+				return await this.GenRelic(cmd)
+			})
+		)
+		return results.filter((result): result is GenRelicResult => result !== null)
+	}
+
+	async GenRelic(cmd: string, Language: string = "EN"): Promise<GenRelicResult | null> {
+		// Load configs
+		const relicConfig = this.excel.getConfig("RelicConfig.json")
+		const itemConfigRelic = this.excel.getConfig("ItemConfigRelic.json")
+		const relicMainAffix = this.excel.getConfig("RelicMainAffixConfig.json")
+		const relicSubAffix = this.excel.getConfig("RelicSubAffixConfig.json")
+		const avatarProperty = this.excel.getConfig("AvatarPropertyConfig.json")
+		if (!relicConfig || !itemConfigRelic || !relicMainAffix || !relicSubAffix || !avatarProperty) {
+			log.errorNoStack("Error loading one or more config files")
+			return null
+		}
+
+		// Parse input command
+		const parts = cmd.split(" ")
+		if (parts.length < 3) return null
+		const item_id = parseInt(parts[1], 10)
+
+		// Initialize parameters
+		let level = 0
+		let itemCount = 1
+		let mainPropId = 0
+		let maxSteps = false
+		const subTokens: string[] = []
+
+		// Classify all tokens (flags vs sub-affixes)
+		for (let i = 2; i < parts.length; i++) {
+			const p = parts[i]
+			if (p === "-maxsteps") {
+				maxSteps = true
+			} else if (p.startsWith("x")) {
+				itemCount = parseInt(p.substring(1), 10)
+			} else if (p.startsWith("lv")) {
+				level = parseInt(p.substring(2), 10)
+			} else if (p.startsWith("s")) {
+				mainPropId = parseInt(p.substring(1), 10)
+			} else if (/^\d+[:.,;]\d+$/.test(p)) {
+				subTokens.push(p)
+			}
+		}
+
+		// Lookup main relic data
+		const dataRelic = Object.values(relicConfig).find((it) => it.ID === item_id)
+		if (!dataRelic) return null
+
+		// Determine maxLevel from config
+		let maxLevel = dataRelic.MaxLevel ?? 900
+
+		// Clamp mainPropId between 1–5
+		mainPropId = Math.min(Math.max(mainPropId, 1), 5)
+
+		const mainAff = Object.values(relicMainAffix).find(
+			(a) => a.AffixID === mainPropId && a.GroupID === dataRelic.MainAffixGroup
+		)
+		if (!mainAff) return null
+
+		// Resolve main property name and value
+		const propDefMain = Object.values(avatarProperty).find((p) => p.PropertyType === mainAff.Property)
+		if (!propDefMain) return null
+		const nameMain = General.findNameHash(propDefMain.PropertyName.Hash, Language, LANG_SR, FOLDER_SR)
+		const baseMain = mainAff.BaseValue.Value
+		const addMain = mainAff.LevelAdd.Value * level
+		const mainFormatted = mainAff.Property.endsWith("Delta")
+			? `${nameMain}: ${Math.floor(baseMain + addMain)}`
+			: `${nameMain}: ${((baseMain + addMain) * 100).toFixed(2)} %`
+
+		// Limit to at most 4 sub-affixes
+		const limitedSubs = subTokens.slice(0, 4)
+		const subResults: string[] = []
+
+		// Process each sub-affix token
+		for (const token of limitedSubs) {
+			const [idStr, countStr] = token.split(/[,:;.]/)
+			const subId = parseInt(idStr, 10)
+			const qty = parseInt(countStr, 10)
+
+			const subAff = Object.values(relicSubAffix).find(
+				(a) => a.AffixID === subId && a.GroupID === dataRelic.SubAffixGroup
+			)
+			if (!subAff) continue
+
+			const propDefSub = Object.values(avatarProperty).find((p) => p.PropertyType === subAff.Property)
+			if (!propDefSub) continue
+			const nameSub = General.findNameHash(propDefSub.PropertyName.Hash, Language, LANG_SR, FOLDER_SR)
+
+			const maxCount = Math.floor(maxLevel / 3) + 1
+			const count = Math.min(qty, maxCount)
+			let value = subAff.BaseValue.Value + subAff.StepValue.Value * 2
+			if (count >= 2) value *= count
+
+			const subFormatted = subAff.Property.endsWith("Delta")
+				? `${nameSub}: ${Math.floor(value)}`
+				: `${nameSub}: ${(value * 100).toFixed(2)} %`
+			subResults.push(subFormatted)
+		}
+
+		// Build and return JSON
+		return {
+			id: item_id,
+			count: itemCount,
+			level,
+			main: mainFormatted,
+			sub: subResults
+		}
+	}
 
 	async runRelic(rebuild: boolean, replace: boolean, fastcheck: boolean): Promise<void> {
 		// Lock basic stats (TODO: remove stats in name)

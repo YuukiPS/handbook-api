@@ -1,9 +1,25 @@
 import express, { Request, Response } from "express"
-import DB from "@DB/book/general"
+import General from "@DB/book/general"
+import SRTool from "@DB/book/star-rail"
 const r = express.Router()
 
 r.all("/", (req: Request, res: Response) => {
 	res.send(`Book API`)
+})
+
+r.all("/item/:lang/:game/:type/:id", async (req: Request, res: Response) => {
+	const { id, game, type, lang } = req.params
+
+	// parse once
+	const idNum = parseInt(id as string) || 0
+	const gameNum = parseInt(game as string) || 0
+	const typeNum = parseInt(type as string) || 0
+	const langString = (lang as string) || "en"
+
+	const result = await General.getItem(idNum, typeNum, gameNum, langString)
+	// TODO: get details data
+
+	res.json(result)
 })
 
 r.all("/item", async (req: Request, res: Response) => {
@@ -13,6 +29,7 @@ r.all("/item", async (req: Request, res: Response) => {
 	const pageNum = parseInt(page as string) || 1
 	const gameNum = parseInt(game as string) || 0
 	const typeNum = parseInt(type as string) || 0
+	const langString = (lang as string) || "en"
 
 	// try to parse limit; NaN means “not provided”
 	const rawLimit = parseInt(req.query.limit as string)
@@ -22,16 +39,31 @@ r.all("/item", async (req: Request, res: Response) => {
 	// if type≠0, allow 0 (all) or any user‑provided limit
 	const limit = typeNum === 0 ? (hasLimit && rawLimit > 0 ? rawLimit : 10) : hasLimit ? rawLimit : 0
 
-	const result = await DB.getItem({
+	const result = await General.findItem({
 		search: search as string,
 		page: pageNum,
 		game: gameNum,
 		type: typeNum,
-		lang: lang as string,
+		lang: langString,
 		limit
 	})
 
 	res.json(result)
+})
+
+// SR for Relic
+r.all("/gen/relic", async (req: Request, res: Response) => {
+	const { cmd } = req.query
+	var tes = await SRTool.GenRelic(cmd as string)
+	res.json(tes)
+})
+r.all("/top/relic", async (req: Request, res: Response) => {
+	const { avatar } = req.query
+	const avatarNum = parseInt(avatar as string) || 0
+	var tes = await SRTool.findRelicBuild({
+		avatar: avatarNum
+	})
+	res.json(tes)
 })
 
 export default r
