@@ -30,7 +30,7 @@ interface StageConfigData {
 	HEIKKHLKMOA: string // field name
 	MBMDOCJIMEJ: string // value
 }
-interface MonsterData {
+interface KeyStringNumber {
 	[key: string]: number
 }
 
@@ -323,7 +323,7 @@ export interface StageConfigExcelSR {
 	// maybe useful for auto LC
 	StageAbilityConfig: string[]
 	StageConfigData: StageConfigData
-	MonsterList: MonsterData
+	MonsterList: KeyStringNumber
 }
 export interface AvatarExcelGI {
 	id: number
@@ -355,6 +355,7 @@ export interface AvatarExcelSR {
 	AvatarBaseType: string
 	Rarity: string
 	DamageType: string
+	AvatarVOTag: string
 }
 export interface AvatarPropertyExcelSR {
 	PropertyType: string
@@ -560,19 +561,49 @@ export interface GenRelicResult {
 	level: number
 	main: string
 	sub: string[]
+	raw: BuildRelicData
 }
-export interface BuildRelicData {
+export interface BuildData {
+	/** Use this as the MongoDB _id */
+	_id: number
 	owner: number
 	title: string
-	avatar: number
-	lightcone: number
+	avatar?: BuildAvatarData
+	equipment?: BuildEquipmentData // light cone
+	relic?: BuildRelicData[]
 	vote: number
 	time: number
-	cmd?: string[]
-	preview?: GenRelicResult[]
+	update: number
 }
-export interface BuildRelicRsp {
+export interface BuildAvatarData {
+	id: number
+	level: number
+	rank: number // Eidolon
+	promotion: number // This changes based on level
+	skills?: KeyStringNumber // Trace
+	buff?: number[] // or Techniques
+}
+export interface BuildEquipmentData {
+	id: number
+	level: number
+	rank: number
+	promotion: number // This changes based on level
+}
+export interface BuildRelicData {
+	id: number
+	main: number
+	sub: BuildRelicSubData[]
+	level: number
+	count: number // count item add
+	sort: boolean
+}
+export interface BuildRelicSubData {
+	id: number
+	count: number
+	step: number // Custom Stats, (Perfect lock 2)
+}
+export interface BuildRsp {
 	message: string
 	retcode: number
-	data: BuildRelicData[] | null
+	data: BuildData[] | null
 }

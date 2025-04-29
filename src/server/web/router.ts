@@ -52,16 +52,27 @@ r.all("/item", async (req: Request, res: Response) => {
 })
 
 // SR for Relic
+/*
 r.all("/gen/relic", async (req: Request, res: Response) => {
 	const { cmd } = req.query
 	var tes = await SRTool.GenRelic(cmd as string)
 	res.json(tes)
 })
-r.all("/top/relic", async (req: Request, res: Response) => {
-	const { avatar } = req.query
-	const avatarNum = parseInt(avatar as string) || 0
-	var tes = await SRTool.findRelicBuild({
-		avatar: avatarNum
+*/
+r.all("/build/sr", async (req: Request, res: Response) => {
+	var idAvatar = req.query.avatar as string
+	if (idAvatar == "all") idAvatar = "0"
+
+	const avatarNum = parseInt(idAvatar) || 0
+	const searchString = (req.query.search as string) || ""
+	const page = parseInt(req.query.page as string) || 1
+	const limit = parseInt(req.query.limit as string) || 0
+
+	var tes = await SRTool.findBuild({
+		avatar: avatarNum,
+		search: searchString,
+		page,
+		limit
 	})
 	res.json(tes)
 })

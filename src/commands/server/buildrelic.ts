@@ -4,7 +4,7 @@ import * as fs from "fs"
 import SRTool, { FOLDER_SR } from "@DB/book/star-rail"
 import General from "@DB/book/general"
 import { getTimeV2, readJsonFileAsync } from "@UT/library"
-import { BuildRelicData } from "@UT/response"
+import { BuildData } from "@UT/response"
 
 const log = new Logger("/buildrelic", "blue")
 
@@ -111,6 +111,7 @@ export default async function handle(command: Command) {
     https://docs.google.com/spreadsheets/d/e/2PACX-1vRsm60jYo8MdHWimjvY42wE8-j-0NBwG9-KutpNcQbylhhBiKBpGmUm1x3CXExthl2EB438RdMWdeT3/pubhtml#
     https://genshin.gg/star-rail/characters/castorice/
     https://game8.co/games/Honkai-Star-Rail/archives/486305
+	// https://github.com/Samuel-Nguyen/LunarCore-Builder-Plugin/releases
     */
 	//convertCsvToJson(`${FOLDER_SR}/data/lc.csv`, `${FOLDER_SR}/data/lc.json`)
 	var data = await readJsonFileAsync<any>(`${FOLDER_SR}/data/lc.json`)
@@ -118,24 +119,33 @@ export default async function handle(command: Command) {
 	const slots = ["Rope", "Orb", "Shoes", "Body", "Gloves", "Hat"] as const
 	for (const item of data) {
 		var find = item.Character
+		var r = find
+		var title = item.Mode
 
 		// TODO: make this better
 		if (find.includes("Destruction (Phys) Trailblazer")) {
-			find = "Trailblazer Girl Warrior"
-		}
-		if (find.includes("Preservation (Fire) Trailblazer")) {
-			find = "Trailblazer Girl Knight"
-		}
-		if (find.includes("Harmony (Imaginary) Trailblazer")) {
-			find = "Trailblazer Girl Shaman"
-		}
-		if (find.includes("Remembrance (Ice) Trailblazer")) {
-			find = "Trailblazer Girl Memory"
+			find = "Trailblazer Girl Physical"
+		} else if (find.includes("Preservation (Fire) Trailblazer")) {
+			find = "Trailblazer Girl Fire"
+		} else if (find.includes("Harmony (Imaginary) Trailblazer")) {
+			find = "Trailblazer Girl Imaginary"
+		} else if (find.includes("Remembrance (Ice) Trailblazer")) {
+			find = "Trailblazer Girl Ice"
+		} else if (find.includes("March 7th (Preservation)")) {
+			find = "March 7th Ice"
+		} else if (find.includes("March 7th (Hunt)")) {
+			find = "March 7th Imaginary"
+		} else if (find.includes("Dan Heng Imbibitor Lunae (Dan IL)")) {
+			find = "Dan Heng • Imbibitor Lunae"
+		} else if (find.includes("Dan Heng Glamoth")) {
+			find = "Dan Heng"
+		} else {
+			find = find.split(" ")[0]
 		}
 
 		// get id avatar
 		var avatarData = await General.findItem({
-			search: find.split(" ")[0], // TODO: make this better
+			search: find, // TODO: make this better
 			game: 2,
 			type: 1,
 			lang: "en"
@@ -144,29 +154,58 @@ export default async function handle(command: Command) {
 			log.warn(`Avatar ${find} not found in datebase`)
 			continue
 		}
-		const obj: BuildRelicData = {
-			//id,
+
+		var dataAva = avatarData.data[0]
+		const obj: BuildData = {
 			owner: 110000000, // tmp uid yuuki account for auto build lc data
-			title: item.Mode,
-			avatar: avatarData.data[0].id,
-			lightcone: 0,
+			title,
+			avatar: {
+				id: dataAva.id,
+				level: 80,
+				rank: 6,
+				promotion: 6
+			},
 			vote: 0,
 			time: getTimeV2(true),
-			cmd: []
+			update: getTimeV2(true),
+			relic: [],
+			_id: await General.getCount("buildSR")
 		}
 		id++
-		obj.cmd = slots
-			.map((slotName) => item[slotName]) // pull each value
-			.filter((v): v is string => Boolean(v)) // drop undefined / empty
-			.map((str) => str.replace(/\//g, "")) // strip ALL “/”
 
 		if (item["Light Cone"]) {
-			obj.lightcone = parseInt(item["Light Cone"].split(" ")[1])
+			obj.equipment = {
+				id: parseInt(item["Light Cone"].split(" ")[1]),
+				level: 80,
+				promotion: 6, // This changes based on level
+				rank: 5 // Super Impostion
+			}
 		}
 
-		if (obj.cmd.length >= 1) {
-			log.info(`Build relic ${obj.avatar} - ${obj.title} - ${obj.cmd.join(",")}`)
-            await SRTool.addRelicBuild(obj)
+		// Extract values containing "/give" for each object
+		const giveItems = Object.entries(item)
+			.map(([key, value]) => {
+				if (key === "Light Cone") return null
+				if (typeof value === "string" && value.includes("/give")) {
+					return value
+				}
+				return null
+			})
+			.filter((value): value is string => value !== null)
+
+		for (const giveItem of giveItems) {
+			var d = SRTool.GenRelic(giveItem)
+			if (!d) {
+				log.warn(`Relic ${giveItem} not found in datebase`)
+				continue
+			}
+			obj.relic?.push(d.raw)
+		}
+
+		if ((obj.relic ?? []).length >= 1) {
+			log.info(`Build [${find} = ${r}] (${obj.avatar?.id}) - ${obj.title} - ${obj.relic?.length} relics`)
+			//console.log(JSON.stringify(obj, null, 2))
+			await SRTool.addBuild(obj)
 		} else {
 			//console.log(obj)
 		}

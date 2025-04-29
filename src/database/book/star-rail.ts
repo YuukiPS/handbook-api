@@ -1,7 +1,8 @@
 import Logger from "@UT/logger"
 import {
+	BuildData,
 	BuildRelicData,
-	BuildRelicRsp,
+	BuildRsp,
 	ClassAvatarExcelSR,
 	ClassAvatarPropertyExcelSR,
 	ClassEquipmentExcelSR,
@@ -102,7 +103,7 @@ function getAvatarBase(name: string): number {
 	return (AvatarBaseType as any)[name] ?? -1
 }
 function getAvatarBaseNumber(id: number): string {
-	return AvatarBaseType[id] ?? "Unknown"
+	return AvatarBaseType[id] ?? "???"
 }
 enum DamageType {
 	Physical = 1000111,
@@ -116,6 +117,9 @@ enum DamageType {
 // in SR DamageType just like elementType in GI, its call ???
 function getDamageType(name: string): number {
 	return (DamageType as any)[name] ?? -1
+}
+function getDamageTypeNumber(id: number): string {
+	return DamageType[id] ?? "???"
 }
 enum RelicType {
 	HEAD = 0,
@@ -182,6 +186,8 @@ class SR {
 		}
 
 		var demoFastcheck = true
+		//foce_save = true
+		//replace = true
 
 		log.info(`Building item data`)
 		await this.runAvatar(foce_save, replace, demoFastcheck)
@@ -269,46 +275,46 @@ class SR {
 		}
 	}
 		*/
-	async addRelicBuild(obj: BuildRelicData): Promise<boolean> {
+	async addBuild(obj: BuildData): Promise<boolean> {
 		await DBMongo.isConnected()
-		const collection = DBMongo.getCollection<BuildRelicData>("build_relic")
+		const collection = DBMongo.getCollection<BuildData>("build_sr")
 		if (!collection) {
-			log.errorNoStack("api_db_nofound_collection_buildrelic")
+			log.errorNoStack("api_db_nofound_collection_build")
 			return false
 		}
 
-		await collection.insertOne(obj as Required<BuildRelicData>)
+		await collection.insertOne(obj as Required<BuildData>)
 		return true
 	}
 
-	async findRelicBuild(
-		options: {
+	async findBuild(
+		opions: {
 			search?: string // filter by title (case-insensitive, partial match)
 			avatar?: number // filter by avatar ID
-			limit?: number // items per page (default: 10)
+			limit?: number // items per page (default: 10; 0 = no limit)
 			page?: number // page number (default: 1)
 			sort?: "vote" | "time" // sort field (default: 'time')
 		} = {}
-	): Promise<BuildRelicRsp> {
+	): Promise<BuildRsp> {
 		await DBMongo.isConnected()
-		const collection = DBMongo.getCollection<BuildRelicData>("build_relic")
+		const collection = DBMongo.getCollection<BuildData>("build_sr")
 		if (!collection) {
-			log.errorNoStack("api_db_nofound_collection_buildrelic")
+			log.errorNoStack("api_db_nofound_collection_build")
 			return {
-				message: 'Collection "build_relic" not found',
+				message: 'Collection "build_sr" not found',
 				retcode: 500,
 				data: null
 			}
 		}
 
 		// Destructure with defaults
-		const { search, avatar, limit = 10, page = 1, sort = "time" } = options
+		const { search, avatar, limit = 10, page = 1, sort = "time" } = opions
 
 		// Build Mongo filter
 		const filter: Record<string, any> = {}
 
 		if (!isEmpty(search)) filter.title = { $regex: search, $options: "i" }
-		if (!isEmpty(avatar)) filter.avatar = avatar
+		if (!isEmpty(avatar)) filter["avatar.id"] = avatar
 
 		// Compute skip for pagination
 		const skip = (page - 1) * limit
@@ -316,13 +322,17 @@ class SR {
 		// Build sort object
 		const sortObj: Record<string, -1> = sort === "vote" ? { vote: -1 } : { time: -1 }
 
-		// Execute query
-		const cursor = collection.find(filter).sort(sortObj).skip(skip).limit(limit)
+		log.info(`Find build with filter: ${JSON.stringify(filter)}`)
+
+		// Execute query with optional limit
+		let cursor = collection.find(filter).sort(sortObj).skip(skip)
+
+		// apply limit only if limit > 0
+		if (limit > 0) {
+			cursor = cursor.limit(limit)
+		}
 
 		const results = await cursor.toArray()
-		for (var item of results) {
-			item.preview = await this.generatePreview(item.cmd)
-		}
 
 		return {
 			message: "success",
@@ -342,7 +352,7 @@ class SR {
 		return results.filter((result): result is GenRelicResult => result !== null)
 	}
 
-	async GenRelic(cmd: string, Language: string = "EN"): Promise<GenRelicResult | null> {
+	GenRelic(cmd: string, Language: string = "EN"): GenRelicResult | null {
 		// Load configs
 		const relicConfig = this.excel.getConfig("RelicConfig.json")
 		const itemConfigRelic = this.excel.getConfig("ItemConfigRelic.json")
@@ -354,10 +364,23 @@ class SR {
 			return null
 		}
 
+		var raw: BuildRelicData = {
+			id: 0,
+			main: -1,
+			sub: [],
+			sort: true, // TODO: add command to sort
+			level: 15,
+			count: 1
+		}
+
 		// Parse input command
 		const parts = cmd.split(" ")
-		if (parts.length < 3) return null
+		if (parts.length < 3) {
+			log.errorNoStack("Invalid command format")
+			return null
+		}
 		const item_id = parseInt(parts[1], 10)
+		raw.id = item_id
 
 		// Initialize parameters
 		let level = 0
@@ -373,10 +396,13 @@ class SR {
 				maxSteps = true
 			} else if (p.startsWith("x")) {
 				itemCount = parseInt(p.substring(1), 10)
+				raw.count = itemCount
 			} else if (p.startsWith("lv")) {
 				level = parseInt(p.substring(2), 10)
+				raw.level = level
 			} else if (p.startsWith("s")) {
 				mainPropId = parseInt(p.substring(1), 10)
+				raw.main = mainPropId
 			} else if (/^\d+[:.,;]\d+$/.test(p)) {
 				subTokens.push(p)
 			}
@@ -384,7 +410,10 @@ class SR {
 
 		// Lookup main relic data
 		const dataRelic = Object.values(relicConfig).find((it) => it.ID === item_id)
-		if (!dataRelic) return null
+		if (!dataRelic) {
+			log.errorNoStack(`Relic ID ${item_id} not found`)
+			return null
+		}
 
 		// Determine maxLevel from config
 		let maxLevel = dataRelic.MaxLevel ?? 900
@@ -395,11 +424,17 @@ class SR {
 		const mainAff = Object.values(relicMainAffix).find(
 			(a) => a.AffixID === mainPropId && a.GroupID === dataRelic.MainAffixGroup
 		)
-		if (!mainAff) return null
+		if (!mainAff) {
+			log.errorNoStack(`Main Affix ID ${mainPropId} not found`)
+			return null
+		}
 
 		// Resolve main property name and value
 		const propDefMain = Object.values(avatarProperty).find((p) => p.PropertyType === mainAff.Property)
-		if (!propDefMain) return null
+		if (!propDefMain) {
+			log.errorNoStack(`Property type ${mainAff.Property} not found`)
+			return null
+		}
 		const nameMain = General.findNameHash(propDefMain.PropertyName.Hash, Language, LANG_SR, FOLDER_SR)
 		const baseMain = mainAff.BaseValue.Value
 		const addMain = mainAff.LevelAdd.Value * level
@@ -413,9 +448,13 @@ class SR {
 
 		// Process each sub-affix token
 		for (const token of limitedSubs) {
-			const [idStr, countStr] = token.split(/[,:;.]/)
+			const [idStr, countStr, stepStr] = token.split(/[,:;.]/)
 			const subId = parseInt(idStr, 10)
 			const qty = parseInt(countStr, 10)
+			let step = parseInt(stepStr, 10) || -1
+			if (maxSteps) {
+				step = qty * 2
+			}
 
 			const subAff = Object.values(relicSubAffix).find(
 				(a) => a.AffixID === subId && a.GroupID === dataRelic.SubAffixGroup
@@ -435,6 +474,11 @@ class SR {
 				? `${nameSub}: ${Math.floor(value)}`
 				: `${nameSub}: ${(value * 100).toFixed(2)} %`
 			subResults.push(subFormatted)
+			raw.sub.push({
+				id: subId,
+				count,
+				step
+			})
 		}
 
 		// Build and return JSON
@@ -443,7 +487,8 @@ class SR {
 			count: itemCount,
 			level,
 			main: mainFormatted,
-			sub: subResults
+			sub: subResults,
+			raw
 		}
 	}
 
@@ -1266,6 +1311,7 @@ class SR {
 				}
 
 				var wp = getAvatarBase(data.AvatarBaseType)
+				var el = getDamageType(data.DamageType)
 				const obj: ItemAvatar = {
 					type: typeClass, // 1=avatar
 					game: typeGame,
@@ -1277,7 +1323,7 @@ class SR {
 					// other
 					starType: getStarSR(infoCard.Rarity), // maybe just use star item (infoCard) instead of star avatar in getAvatar (CombatPowerAvatarRarityType4)
 					weaponType: wp,
-					elementType: getDamageType(data.DamageType),
+					elementType: el,
 					bodyType: -1 //isBoy ? 1 : 2 // TODO: get better bodytype
 				}
 
@@ -1293,6 +1339,12 @@ class SR {
 				}
 
 				// add name
+				var ma = ""
+				if (data.AvatarVOTag.includes("mar7th")) {
+					ma = `${getDamageTypeNumber(el)}`
+				} else if (data.AvatarVOTag.includes("player")) {
+					ma = `${isBoy ? "Boy" : "Girl"} ${getDamageTypeNumber(el)}`
+				}
 				obj.name = General.addMultiLangNamesAsObject(
 					data.AvatarName.Hash.toString(),
 					LANG_SR,
@@ -1300,7 +1352,8 @@ class SR {
 					obj.game,
 					"",
 					"",
-					`${isBoy ? "Boy" : "Girl"} ${getAvatarBaseNumber(wp)}` // TODO: find NT name this
+					``,
+					ma
 				)
 				if (Object.keys(obj.name).length === 0) {
 					log.warn(`skip avatar ${id}`)

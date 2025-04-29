@@ -363,7 +363,8 @@ export const _ = {
 		type: number = 0, // 1=genshin, 2=starrail
 		nameIfNotFound: string = "",
 		addNameCustom: string = "",
-		nameSR: string = ""
+		nameSR: string = "",
+		namaSR2: string = ""
 	): Record<string, string> {
 		const names: Record<string, string> = {}
 		// || `UNK-${hash}`
@@ -375,7 +376,10 @@ export const _ = {
 				//log.errorNoStack("not found", hash, lang)
 				continue
 			}
-			isValid = isValid.replace("{NICKNAME}", `Trailblazer ${nameSR}`) // Mod SR
+			isValid = isValid.replace("{NICKNAME}", `Trailblazer`) // Mod SR
+			if (!isEmpty(namaSR2)) {
+				isValid = `${isValid} ${namaSR2}` // Mod SR
+			}
 			names[lang] = isValid + addNameCustom
 		}
 		if (!isEmpty(nameIfNotFound) && Object.keys(names).length == 0) {
@@ -584,6 +588,15 @@ export const _ = {
 				data: null
 			}
 		}
+	},
+	getCount: async function (field: string): Promise<number> {
+		var count = 1
+		var countData = await this.getProp(field)
+		if (countData.data) {
+			count = parseInt(countData.data.value) + 1
+		}
+		await this.updateProp(field, count.toString(), "count")
+		return count
 	},
 	getProp: async function (field: string): Promise<PropRsp> {
 		try {
