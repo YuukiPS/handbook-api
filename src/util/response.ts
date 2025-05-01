@@ -1,3 +1,5 @@
+import { isEmpty } from "./library"
+
 // Git
 export interface GitLabCommit {
 	id: string
@@ -451,6 +453,57 @@ export interface BookRsp {
 	retcode: number
 	data: any[] | null
 }
+export enum TypeItem {
+	Avatar = 1,
+	Normal = 2,
+	Monster = 3,
+	Weapon = 4,
+	Scene = 5,
+	Gadget = 6,
+	ArtifactMain = 7,
+	ArtifactSub = 8,
+	ArtifactConfig = 9,
+	Quest = 10,
+	Plane = 11,
+	Stage = 12
+}
+export function getAllTypeItem(): String[] {
+	return Object.keys(TypeItem)
+		.map((key) => TypeItem[key as keyof typeof TypeItem])
+		.filter((value) => typeof value === "string") as string[]
+}
+export function getTypeItem(value: string): number {
+	if(isEmpty(value)) return 0
+
+	// 1) Normalize input: trim, lowercase, then capitalize first letter
+	const normalize = (str: string) =>
+		str
+			.trim()
+			.toLocaleLowerCase()
+			.replace(/^\w/, (c) => c.toLocaleUpperCase())
+
+	let key = normalize(value)
+	let item = TypeItem[key as keyof typeof TypeItem]
+
+	// 2) If that didn’t match, try a basic singularization:
+	if (item === undefined) {
+		let singular = key
+		if (key.endsWith("s")) {
+			// e.g. “Avatars” → “Avatar”
+			singular = normalize(key.slice(0, -1))
+		}
+		// re-lookup
+		if (singular !== key) {
+			key = singular
+			item = TypeItem[singular as keyof typeof TypeItem]
+		}
+	}
+
+	const result = item ?? 0
+	console.log(`getTypeItem ${key} (from “${value}”) → ${result}`)
+	return result
+}
+
 export interface ItemData {
 	id: number // id item
 	type: number // 1=avatar,

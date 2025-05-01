@@ -111,7 +111,7 @@ export default async function handle(command: Command) {
     https://docs.google.com/spreadsheets/d/e/2PACX-1vRsm60jYo8MdHWimjvY42wE8-j-0NBwG9-KutpNcQbylhhBiKBpGmUm1x3CXExthl2EB438RdMWdeT3/pubhtml#
     https://genshin.gg/star-rail/characters/castorice/
     https://game8.co/games/Honkai-Star-Rail/archives/486305
-	// https://github.com/Samuel-Nguyen/LunarCore-Builder-Plugin/releases
+	https://github.com/Samuel-Nguyen/LunarCore-Builder-Plugin/releases
     */
 	//convertCsvToJson(`${FOLDER_SR}/data/lc.csv`, `${FOLDER_SR}/data/lc.json`)
 	var data = await readJsonFileAsync<any>(`${FOLDER_SR}/data/lc.json`)
@@ -169,7 +169,7 @@ export default async function handle(command: Command) {
 			time: getTimeV2(true),
 			update: getTimeV2(true),
 			relic: [],
-			_id: await General.getCount("buildSR")
+			_id: 0//await General.getCount("buildSR")
 		}
 		id++
 
@@ -205,7 +205,7 @@ export default async function handle(command: Command) {
 		if ((obj.relic ?? []).length >= 1) {
 			log.info(`Build [${find} = ${r}] (${obj.avatar?.id}) - ${obj.title} - ${obj.relic?.length} relics`)
 			//console.log(JSON.stringify(obj, null, 2))
-			await SRTool.addBuild(obj)
+			//await SRTool.addBuild(obj)
 		} else {
 			//console.log(obj)
 		}

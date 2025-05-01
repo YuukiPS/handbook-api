@@ -1,10 +1,21 @@
 import express, { Request, Response } from "express"
 import General from "@DB/book/general"
+import AI from "@DB/book/ai"
 import SRTool from "@DB/book/star-rail"
 const r = express.Router()
 
 r.all("/", (req: Request, res: Response) => {
 	res.send(`Book API`)
+})
+
+r.all("/ai/ask", async (req: Request, res: Response) => {
+	const { message, uid } = req.query
+	if (!message || !uid) {
+		res.status(400).send("Missing message or uid")
+		return
+	}
+	const result = await AI.openChat(message as string, uid as string)
+	res.send(result)
 })
 
 r.all("/item/:lang/:game/:type/:id", async (req: Request, res: Response) => {
@@ -67,12 +78,13 @@ r.all("/build/sr", async (req: Request, res: Response) => {
 	const searchString = (req.query.search as string) || ""
 	const page = parseInt(req.query.page as string) || 1
 	const limit = parseInt(req.query.limit as string) || 0
-
+	const recommendation = parseInt(req.query.recommendation as string) || 0 // 0 = snow all, 1 = Each avatar only gives 1 recommendation which is voted based on the user but if no vote it will give 1 random one and filter only those with avatars
 	var tes = await SRTool.findBuild({
 		avatar: avatarNum,
 		search: searchString,
 		page,
-		limit
+		limit,
+		recommendation
 	})
 	res.json(tes)
 })

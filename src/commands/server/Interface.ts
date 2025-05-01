@@ -37,7 +37,7 @@ export default class Interface {
 				})
 				.catch((err) => {
 					if (err.code == "MODULE_NOT_FOUND") {
-						log.error(`Command ${cmd.name} not found.`)
+						log.errorNoStack(`Command ${cmd.name} not found.`, err)
 						return
 					}
 					log.error(err)

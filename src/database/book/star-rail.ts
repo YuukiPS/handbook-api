@@ -33,6 +33,7 @@ import ExcelManager from "@UT/excel"
 // thrid party
 import { isMainThread } from "worker_threads"
 import path from "path"
+import { Document, Sort } from "mongodb"
 // datebase
 import DBMongo from "@DB/client/mongo"
 import General from "@DB/book/general"
@@ -288,12 +289,14 @@ class SR {
 	}
 
 	async findBuild(
-		opions: {
-			search?: string // filter by title (case-insensitive, partial match)
-			avatar?: number // filter by avatar ID
-			limit?: number // items per page (default: 10; 0 = no limit)
-			page?: number // page number (default: 1)
-			sort?: "vote" | "time" // sort field (default: 'time')
+		options: {
+			search?: string
+			avatar?: number
+			limit?: number
+			page?: number
+			sortBy?: "vote" | "time"
+			sortOrder?: number
+			recommendation?: number
 		} = {}
 	): Promise<BuildRsp> {
 		await DBMongo.isConnected()
@@ -307,32 +310,52 @@ class SR {
 			}
 		}
 
-		// Destructure with defaults
-		const { search, avatar, limit = 10, page = 1, sort = "time" } = opions
+		// Destructure with defaults (added sortOrder & recommendation)
+		const { search, avatar, limit = 10, page = 1, sortBy = "time", sortOrder = -1, recommendation = 0 } = options
 
-		// Build Mongo filter
+		// Build filter
 		const filter: Record<string, any> = {}
-
-		if (!isEmpty(search)) filter.title = { $regex: search, $options: "i" }
-		if (!isEmpty(avatar)) filter["avatar.id"] = avatar
-
-		// Compute skip for pagination
-		const skip = (page - 1) * limit
-
-		// Build sort object
-		const sortObj: Record<string, -1> = sort === "vote" ? { vote: -1 } : { time: -1 }
-
-		log.info(`Find build with filter: ${JSON.stringify(filter)}`)
-
-		// Execute query with optional limit
-		let cursor = collection.find(filter).sort(sortObj).skip(skip)
-
-		// apply limit only if limit > 0
-		if (limit > 0) {
-			cursor = cursor.limit(limit)
+		if (!isEmpty(search)) {
+			filter.title = { $regex: search, $options: "i" }
+		}
+		if (!isEmpty(avatar)) {
+			filter["avatar.id"] = avatar
 		}
 
-		const results = await cursor.toArray()
+		let results: BuildData[]
+
+		// Recommendation mode: one build per avatar
+		if (recommendation === 1) {
+			// only consider documents with an avatar
+			filter["avatar.id"] = { $exists: true }
+
+			const pipeline: Document[] = [
+				{ $match: filter },
+				{ $sort: { [sortBy]: sortOrder } },
+				// group by avatar.id, pick the first (highest‐sorted) document
+				{ $group: { _id: "$avatar.id", build: { $first: "$$ROOT" } } },
+				// unwind back to root
+				{ $replaceRoot: { newRoot: "$build" } }
+				// (optional) add pagination here:
+				// { $skip: (page - 1) * limit },
+				// { $limit: limit },
+			]
+
+			results = await collection.aggregate<BuildData>(pipeline).toArray()
+		} else {
+			// Regular find/sort/paginate
+			const skip = (page - 1) * limit
+			let cursor = collection
+				.find(filter)
+				.sort({ [sortBy]: sortOrder } as Sort)
+				.skip(skip)
+			if (limit > 0) {
+				cursor = cursor.limit(limit)
+			}
+			results = await cursor.toArray()
+		}
+		
+		log.info(`sea > ${results.length}x`, filter)
 
 		return {
 			message: "success",
