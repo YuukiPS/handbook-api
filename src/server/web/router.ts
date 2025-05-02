@@ -2,19 +2,27 @@ import express, { Request, Response } from "express"
 import General from "@DB/book/general"
 import AI from "@DB/book/ai"
 import SRTool from "@DB/book/star-rail"
+import Logger from "@UT/logger"
 const r = express.Router()
+
+const log = new Logger("Web")
 
 r.all("/", (req: Request, res: Response) => {
 	res.send(`Book API`)
 })
 
 r.all("/ai/ask", async (req: Request, res: Response) => {
-	const { message, uid } = req.query
+	const { message, uid, json } = req.query
+	var isJson = false
+	if (json && typeof json === "string") {
+		isJson = json.toLowerCase() === "true"
+	}
 	if (!message || !uid) {
 		res.status(400).send("Missing message or uid")
 		return
 	}
-	const result = await AI.openChat(message as string, uid as string)
+	const result = await AI.openChat(message as string, uid as string, isJson)
+	log.info(`AI: ${uid} > `, result)
 	res.send(result)
 })
 

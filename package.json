@@ -33,6 +33,7 @@
 		"acfg": "^1.2.4",
 		"axios": "^1.7.2",
 		"body-parser": "^1.20.2",
+		"cld3-asm": "^4.0.0",
 		"cookie-parser": "^1.4.6",
 		"cors": "^2.8.5",
 		"express": "^4.21.0",

@@ -15,8 +15,8 @@ export const _ = acfg({
 	},
 	ai:{
 		key: "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-		model: "deepseek-r1-distill-llama-8b", // Note: ollama not work with tools thing so use LM Studio, and stop use deepseek-r1-distill-qwen-1.5b he is really stupid lol
-		baseURL: "https://xxx/ollama/v1/",
+		model: "qwen3:0.6b",
+		baseURL: "https://xxx/ollama/v1/", // need tool so use https://ollama.com/search?c=tools&o=newest
 	},
 	notification: {
 		id_channel: "",

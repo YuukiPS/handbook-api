@@ -7,6 +7,7 @@ import OpenAI from "openai"
 import { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions"
 // database
 import General from "@DB/book/general"
+import { detectLang, isEmpty, LanguageGame } from "@UT/library"
 
 const log = new Logger(`AI`)
 
@@ -19,16 +20,17 @@ const openaiConfig = {
 		"ADDITIONAL RULES FOR CATEGORIES:\n" +
 		`1. ALWAYS extract category from these exact values: ${getAllTypeItem().join(
 			", "
-		)} (Additional info: Item=Normal).\n` +
-		`2. If input contains both name and category (e.g. "ayaka avatar" or "avatar ayaka"),  split into find_id and category parameters.\n` +
-		"3. NEVER modify category names - use exact enum values. (maybe user will use another language so try translating it too)" +
+		)} (Additional info: Item=Normal, Mission/Story=Quest).\n` +
+		"2. NEVER modify category names - use exact enum values." +
+		"3. If category is not mentioned, use 'None' as default.\n" +
 		"\n\n" +
 		"When a user asks a question:\n" +
 		"1. FIRST determine which tool would provide most relevant information.\n" +
 		"2. Call that tool BEFORE attempting to respond yourself.\n" +
 		"3. Wait for tool call results.\n" +
-		"4. ONLY THEN formulate your response based on retrieved information.",
-	//"and Do not attempt to answer questions about commands, IDs, or YuukiPS documentation from memory",
+		"4. ONLY THEN formulate your response based on retrieved information." +
+		"5. if user writing using another language, translate it to English as default.\n" +
+		"6. Do not attempt to answer questions about commands, IDs, or YuukiPS documentation from memory",
 
 	tools: [
 		{
@@ -45,7 +47,13 @@ const openaiConfig = {
 							description:
 								"EXACT name to search. Preserve full names from user input.\n" +
 								"\nExamples:\n" +
-								'- \'Kamisato Ayaka\' → {"search": "Kamisato Ayaka"}'
+								'- "give ayaka avatar" → {"search": "ayaka", "category": "avatars"}' +
+								'- "ayaka avatar" → {"search": "ayaka", "category": "avatars"}' +
+								'- "avatar ayaka" → {"search": "ayaka", "category": "avatars"}' +
+								'- "minta kode id ayaka buat item" → {"search": "ayaka", "category": "Normal"}' +
+								'- "What is the id for ayaka?" → {"search": "ayaka"}' +
+								'- "give my love citlali :*" → {"search": "citlali"}' +
+								'- "What is the mora id for the Genshin game?" → {"search": "mora"}'
 						},
 						category: {
 							type: "string",
@@ -53,8 +61,9 @@ const openaiConfig = {
 								"MUST use when type is mentioned. Match EXACTLY to: " +
 								getAllTypeItem().join(", ") +
 								"\nExamples:\n" +
-								"- 'avatar ayaka' → category: \"Avatars\"\n" +
-								"- 'item mora' → category: \"Normal\""
+								'- "avatar ayaka" → {"category": "avatar"}' +
+								'- "ayaka avatar" → {"category": "avatar"}' +
+								'- "item mora" → {"category": "normal"}'
 						}
 					},
 					required: ["search"]
@@ -82,19 +91,22 @@ class AI {
 			apiKey: config.ai.key,
 			baseURL: config.ai.baseURL
 		})
-		log.info(`AI initialized at ${config.ai.baseURL}`)
+		log.info(`AI initialized at ${config.ai.baseURL} | Model: ${config.ai.model}`)
 	}
 
 	/**
 	 * Handles a user message, uses tool-calling to lookup IDs, and returns the assistant response.
 	 */
-	async openChat(message: string, uid: string): Promise<string> {
+	async openChat(message: string, uid: string, json: boolean = false): Promise<string | object> {
 		// 1) Retrieve history, add system & user
 		let conv = this.conversation.get(uid) || []
 		if (conv.length === 0) {
 			conv.push({ role: "system", content: openaiConfig.systemPrompt })
+			log.info(`${uid} started conversation`)
 		}
+
 		conv.push({ role: "user", content: message })
+		log.info(`${uid} (${conv.length}x) > ${message}`)
 
 		// 2) First pass: ask model which tool to call
 		const first = await this.openai.chat.completions.create({
@@ -108,21 +120,26 @@ class AI {
 		const choice = first.choices[0]
 		const msg = choice.message!
 
-		log.info(`AI Check: ${JSON.stringify(first)}`)
+		//log.info(`${JSON.stringify(first)}`)
+		log.info(`${uid} (${msg.role}) > ${choice.finish_reason} > `, msg.content)
 
 		if (choice.finish_reason === "tool_calls" && msg.tool_calls?.length) {
 			const call = msg.tool_calls[0]
 			const { name, arguments: argsStr } = call.function!
 			const args = JSON.parse(argsStr ?? "{}")
 
+			log.info(`${uid} > Tool called: ${name}(${argsStr})`)
+
 			// 0 - get data
 			const results = await General.findItem({
 				search: args.search,
 				limit: 5,
-				type: getTypeItem(args.category)
+				split: true,
+				type: getTypeItem(args.category),
+				lang: LanguageGame(await detectLang(message))
 			})
 			if (!results.data) {
-				log.warn(`Item ${args.search} not found in datebase`)
+				log.warn(`${uid} > Item ${args.search} not found in datebase`)
 				return `Item ${args.search} not found in database`
 			}
 			/*
@@ -150,8 +167,24 @@ class AI {
 			// save history
 			//conv.push({ role: "assistant", content: finalMsg })
 			//this.conversation.set(uid, conv)
-
-			return `Found ${results.data.length}: ${results.data.map((item) => `${item.name} (${item.id})`).join(", ")}`
+			if (json) {
+				return {
+					data: results.data,
+					ask: message,
+					uid,
+					message: msg.content,
+					total: conv.length
+				}
+			} else {
+				return `Found ${results.data.length}: ${results.data
+					.map((item) => `${item.name} (${item.id})`)
+					.join(", ")}`
+			}
+		} else {
+			if (typeof msg.content === "string") {
+				conv.push(msg)
+				return isEmpty(msg.content) ? `No response from AI` : msg.content
+			}
 		}
 
 		// if no tool was called, fall back to the raw model response
@@ -159,8 +192,8 @@ class AI {
 		//conv.push({ role: "assistant", content: fallback })
 		//this.conversation.set(uid, conv)
 		this.conversation.delete(uid)
-		//return fallback
-		return `No response from AI`
+		log.info(`${uid} > No tool was called, and no fallback response available.`)
+		return `No tool was called, and no fallback response available.`
 	}
 }
 

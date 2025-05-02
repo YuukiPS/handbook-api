@@ -454,6 +454,7 @@ export interface BookRsp {
 	data: any[] | null
 }
 export enum TypeItem {
+	None = 0,
 	Avatar = 1,
 	Normal = 2,
 	Monster = 3,
@@ -500,7 +501,7 @@ export function getTypeItem(value: string): number {
 	}
 
 	const result = item ?? 0
-	console.log(`getTypeItem ${key} (from “${value}”) → ${result}`)
+	//console.log(`getTypeItem ${key} (from “${value}”) → ${result}`)
 	return result
 }
 

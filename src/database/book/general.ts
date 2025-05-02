@@ -17,6 +17,8 @@ import fs from "fs/promises"
 import DBMongo from "@DB/client/mongo"
 import { Filter, OptionalUnlessRequiredId } from "mongodb"
 import config from "@UT/config"
+import { LANG_SR } from "./star-rail"
+import { LANG_GI } from "./genshin-impact"
 
 const log = new Logger("General")
 
@@ -28,6 +30,7 @@ export const _ = {
 		lang?: string
 		limit?: number
 		page?: number
+		split?: boolean
 	}): Promise<BookRsp> {
 		try {
 			const cItem = DBMongo.getCollection<ItemData>("book")
@@ -36,17 +39,37 @@ export const _ = {
 				return { message: "api_db_nofound_collection", retcode: statusCodes.error.CANCEL, data: null }
 			}
 
-			const { search, type, game, lang = "EN", limit = 10, page = 1 } = options || {}
+			const { search, type, game, lang = "EN", limit = 10, page = 1, split = false } = options || {}
 
 			var setlang = lang.toUpperCase()
 
 			// build filter
 			const query: any = {}
-			if (search) query[`name.${setlang}`] = { $regex: search, $options: "i" }
+			if (search) {
+				const words = search.trim().split(/\s+/).filter(Boolean)
+				// 1) list all of your language‐codes here (or pull them from config)
+				const LANGS = [...new Set([...LANG_SR, ...LANG_GI])]
+
+				// helper: build a regex‐clause for one word against all langs
+				const orClausesForWord = (word: string) =>
+					LANGS.map((lang) => ({
+						[`name.${lang}`]: { $regex: word, $options: "i" }
+					}))
+
+				if (!split || words.length === 1) {
+					// simple / single‐word search: OR over all languages
+					query.$or = orClausesForWord(search)
+				} else {
+					// multi‐word split: every word must match at least one lang
+					query.$and = words.map((word) => ({
+						$or: orClausesForWord(word)
+					}))
+				}
+			}
 			if (!isEmpty(type)) query.type = type
 			if (!isEmpty(game)) query.game = game
 
-			log.debug(`query: ${limit} limit > `, query)
+			log.info(`query: ${limit} limit > `, query)
 
 			// compute skip
 			const skip = (page - 1) * limit

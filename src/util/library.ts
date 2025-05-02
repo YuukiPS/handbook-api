@@ -7,6 +7,7 @@ import https from "https"
 import path from "path"
 import { createWriteStream, readFileSync } from "fs"
 import { pipeline } from "stream/promises"
+import { loadModule } from "cld3-asm"
 
 const log = new Logger("Library")
 
@@ -337,4 +338,26 @@ export function createEnum(keys: string[], nameFunc: string): string {
 	return ${enumName}[id] ?? "${defaultKey}";
   }
   `.trim()
+}
+
+export function LanguageGame(i: string): string {
+
+	// Normalize the input for matching (lowercase for locale mapping)
+	const normalizedInput = i.trim().toLowerCase()
+
+	// Fallback to default if no valid language code is detected.
+	var defaultS = i
+	if (i === "zh") {
+		defaultS = "CHS"
+	}
+
+	log.warn(`Language ${i} = ${defaultS}`)
+	return defaultS
+}
+
+export async function detectLang(text: string): Promise<string> {
+	const cldFactory = await loadModule()
+	const identifier = cldFactory.create(0, 1000)
+	const findResult = identifier.findLanguage(text)
+	return findResult?.language || "en_US"
 }

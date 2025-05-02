@@ -9,7 +9,7 @@ export default async function handle(command: Command) {
 	try {
 		log.log(`Chat: ${chat}`)
 		var respon = await AI.openChat(chat, "1")
-		log.log(`AI: ${respon}`)
+		log.log(`AI: `, respon)
 	} catch (error) {
 		log.errorNoStack(`Error: ${error}`)
 	}
