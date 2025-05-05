@@ -21,7 +21,7 @@ r.all("/ai/ask", async (req: Request, res: Response) => {
 		res.status(400).send("Missing message or uid")
 		return
 	}
-	const result = await AI.openChat(message as string, uid as string, isJson)
+	const result = await AI.chat(message as string, uid as string, isJson)
 	log.info(`AI: ${uid} > `, result)
 	res.send(result)
 })

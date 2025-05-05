@@ -8,7 +8,7 @@ export default async function handle(command: Command) {
 	//var chat = "find avatar ayaka";
 	try {
 		log.log(`Chat: ${chat}`)
-		var respon = await AI.openChat(chat, "1")
+		var respon = await AI.chat(chat, "1")
 		log.log(`AI: `, respon)
 	} catch (error) {
 		log.errorNoStack(`Error: ${error}`)

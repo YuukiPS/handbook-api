@@ -6,7 +6,8 @@ import {
 	getStringTypeGameEngine,
 	getTypeGameEngine,
 	getTypeItem,
-	QuestionData
+	QuestionData,
+	TypeDocumentation
 } from "@UT/response"
 import config from "@UT/config"
 import { detectLang, LanguageGame } from "@UT/library"
@@ -19,8 +20,15 @@ import General from "@DB/book/general"
 
 const log = new Logger(`AI`)
 
-// Configuration (Source: https://github.com/YuukiPS/Chatbot/)
-const openaiConfig = {
+/**
+ * Constants and Configuration
+ */
+const MAX_HISTORY_LENGTH = 10 // Maximum number of messages to keep in conversation history
+const MAX_SEARCH_RESULTS = 5 // Maximum number of results to return from search queries
+const SIMILARITY_MATCHES = 3 // Number of similar items to find in embeddings search
+
+// OpenAI Configuration (Source: https://github.com/YuukiPS/Chatbot/)
+const OPENAI_CONFIG = {
 	systemPrompt:
 		"You are a maid named Konno Yuuki, who helps solve various problems related to Handbook, Private Server and knows yourself from Sword Art Online.\n" +
 		"You should ALWAYS retrieve information directly from data using tool calls before providing your own answer.\n\n" +
@@ -28,7 +36,8 @@ const openaiConfig = {
 		"1. FIRST determine which tool would provide most relevant information.\n" +
 		"2. Call that tool BEFORE attempting to respond yourself.\n" +
 		"3. Wait for tool call results.\n" +
-		"4. if user writing using another language, translate it to English as default.\n" +
+		"4. If user writing using another language, translate it to English as default.\n" +
+		"5. <think>Use this tag to analyze problems in detail before answering. Think step by step through complex issues.</think>\n" +
 		"6. ONLY THEN formulate your response based on retrieved information.\n" +
 		"7. DO NOT attempt to answer questions without using tool calls first.\n" +
 		"8. If there really is no tool available, you just answer as a Konno Yuuki (of course without a tool).",
@@ -64,7 +73,7 @@ const openaiConfig = {
 								`1. ALWAYS extract category from these exact values: ${getAllTypeItem().join(", ")}\n` +
 								"2. Additional info: Item=Normal, Mission/Story=Quest).\n" +
 								"3. If category is not mentioned, use 'None' as default.\n" +
-								"2. NEVER modify category names - use exact enum values.\n\n" +
+								"4. NEVER modify category names - use exact enum values.\n\n" +
 								"Examples:\n" +
 								'- "avatar ayaka" → {"category": "avatar"}\n' +
 								'- "ayaka avatar" → {"category": "avatar"}\n' +
@@ -132,7 +141,43 @@ const openaiConfig = {
 	] as ChatCompletionTool[]
 }
 
-function splitThinkContent(message: string): { response: string; think: string } {
+/**
+ * Type definitions
+ */
+enum ResponseType {
+	None = 0,
+	Chat = 1, // normal chat without list menu
+	Item = 2, // need call sub item
+	Answer = 3,
+	CommandHelper = 4
+}
+
+interface ProcessResult {
+	message: string
+	data: null | any
+}
+
+interface ChatResponse {
+	uid: string
+	ask: string
+	message: string
+	think: string
+	type: ResponseType
+	data: null | any
+	totalChat: number
+}
+
+interface MessageContent {
+	response: string
+	think: string
+}
+
+/**
+ * Extract thinking content from AI response
+ * @param message - The raw message from the AI
+ * @returns Object containing visible response and thinking content
+ */
+function extractThinkingContent(message: string): MessageContent {
 	const thinkRegex = /<think>([\s\S]*?)<\/think>/g
 	const thinkParts: string[] = []
 
@@ -145,274 +190,506 @@ function splitThinkContent(message: string): { response: string; think: string }
 
 	return {
 		response,
-		think: thinkParts.join("\n") // or use " " if you prefer space-separated
+		think: thinkParts.join("\n")
 	}
 }
 
-enum TypeResponse {
-	None = 0,
-	Chat = 1, // normal chat without list menu
-	Item = 2, // need call sub item
-	Answer = 3,
-	CommandHelper = 4
-}
-
-interface ProsessData {
-	message: string
-	data: null | any
-}
-interface ResponChatData {
-	uid: string
-	ask: string
-	message: string
-	think: string
-	type: TypeResponse
-	data: null | any
-	totalChat: number
-}
-
+/**
+ * Main AI class
+ * Handles conversation management, tool calls, and embeddings
+ */
 class AI {
-	private ask!: OpenAI
-	private conversation: Map<string, ChatCompletionMessageParam[]> = new Map()
+	private openaiClient!: OpenAI
+	private conversations: Map<string, ChatCompletionMessageParam[]> = new Map()
+	private initialized: boolean = false
 
 	constructor() {
 		if (isMainThread) {
-			log.info(`This is AI main thread`)
+			log.info(`AI system initializing on main thread`)
 			this.init()
 		} else {
-			log.info(`This is AI worker thread`)
+			log.info(`AI running on worker thread`)
 		}
 	}
 
-	async init() {
-		this.ask = new OpenAI({
-			apiKey: config.ai.key,
-			baseURL: `${config.ai.baseURL}${config.ai.ask}`
-		})
-		log.info(`AI initialized at ${config.ai.baseURL}`)
-		log.info(`Model Ask: ${config.ai.modelAsk} | URL: ${config.ai.baseURL}${config.ai.ask}`)
-		log.info(`AModel Ask: ${config.ai.modelEmbed} | URL: ${config.ai.baseURL}${config.ai.embed}`)
+	/**
+	 * Initialize the OpenAI client and embeddings
+	 */
+	async init(): Promise<void> {
+		try {
+			this.openaiClient = new OpenAI({
+				apiKey: config.ai.key,
+				baseURL: `${config.ai.baseURL}${config.ai.ask}`
+			})
 
-		//await this.embedDataset(dataset)
-		log.info(`Dataset embedded`)
+			log.info(`AI initialized at ${config.ai.baseURL}`)
+			log.info(`Model Ask: ${config.ai.modelAsk} | URL: ${config.ai.baseURL}${config.ai.ask}`)
+			log.info(`Model Embed: ${config.ai.modelEmbed} | URL: ${config.ai.baseURL}${config.ai.embed}`)
+
+			this.initialized = true
+			log.info(`AI system ready`)
+		} catch (error) {
+			log.error(`AI initialization failed: ${error}`)
+			throw new Error(`Failed to initialize AI: ${error}`)
+		}
 	}
 
-	async embedDataset(items: QuestionData[] | CommandData[]) {
-		const texts = items
-			.map((item) =>
-				"question" in item
-					? `${item.question} ${item.answer}`
-					: `${item.command} ${item.description} ${item.usage} ${item.type}`
-			)
-			.filter(Boolean)
-		const resp = await fetch(`${config.ai.baseURL}${config.ai.embed}`, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${config.ai.key}`
-			},
-			body: JSON.stringify({ model: config.ai.modelEmbed, input: texts })
-		})
-		if (!resp.ok) throw new Error(`Embedding failed ${resp.status}: ${await resp.text()}`)
-		const json = await resp.json()
-		const embeddings = json.embeddings || json.data?.map((d: any) => d.embedding) || []
-		if (embeddings.length !== items.length)
-			throw new Error(`Expected ${items.length} embeddings, got ${embeddings.length}`)
-		embeddings.forEach((vec: number[], i: number) => {
-			;(items[i] as QuestionData | CommandData).embedding = vec
-		})
-		log.info(`✔︎ Embedded ${items.length} items successfully`)
+	/**
+	 * Embed a dataset of questions or commands
+	 * @param items - Array of QuestionData or CommandData to embed
+	 */
+	async embedDataset(items: (QuestionData | CommandData)[]): Promise<void> {
+		if (!this.initialized) {
+			await this.init()
+		}
+
+		try {
+			const texts = items
+				.map((item) =>
+					"question" in item
+						? `${item.question} ${item.answer}`
+						: `${item.command} ${item.description} ${item.usage} ${item.type}`
+				)
+				.filter(Boolean)
+
+			log.info(`Embedding ${texts.length} items`)
+
+			const response = await fetch(`${config.ai.baseURL}${config.ai.embed}`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${config.ai.key}`
+				},
+				body: JSON.stringify({ model: config.ai.modelEmbed, input: texts })
+			})
+
+			if (!response.ok) {
+				const errorText = await response.text()
+				throw new Error(`Embedding API error ${response.status}: ${errorText}`)
+			}
+
+			const json = await response.json()
+			const embeddings = json.embeddings || json.data?.map((d: any) => d.embedding) || []
+
+			if (embeddings.length !== items.length) {
+				throw new Error(`Expected ${items.length} embeddings, got ${embeddings.length}`)
+			}
+
+			embeddings.forEach((vec: number[], i: number) => {
+				;(items[i] as QuestionData | CommandData).embedding = vec
+			})
+
+			log.info(`✅ Successfully embedded ${items.length} items`)
+		} catch (error) {
+			log.error(`Error embedding dataset: ${error}`)
+			throw error
+		}
 	}
 
+	/**
+	 * Create embeddings for text inputs
+	 * @param texts - Array of texts to embed
+	 * @returns Array of embedding vectors
+	 */
 	async createEmbedding(texts: string[]): Promise<number[][]> {
-		const resp = await fetch(`${config.ai.baseURL}${config.ai.embed}`, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${config.ai.key}`
-			},
-			body: JSON.stringify({ model: config.ai.modelEmbed, input: texts })
-		})
-		if (!resp.ok) throw new Error(`Embedding failed ${resp.status}: ${await resp.text()}`)
-		const json = await resp.json()
-		if (!Array.isArray(json.embeddings)) throw new Error(`Unexpected embedding response shape`)
-		return json.embeddings
-	}
-
-	async prosessItem(search: string, category: string): Promise<ProsessData> {
-		const results = await General.findItem({
-			search: search,
-			limit: 5,
-			split: true,
-			type: getTypeItem(category),
-			lang: LanguageGame(await detectLang(search))
-		})
-		var found = "Not Found"
-		if (results.data) {
-			found = `Found ${results.data.length} > ${results.data
-				.map((item) => `${item.name} (${item.id})`)
-				.join(", ")}`
+		if (!this.initialized) {
+			await this.init()
 		}
-		return {
-			data: results.data,
-			message: found
-		}
-	}
 
-	async prosessAnswer(qa: string): Promise<ProsessData> {
-		var qEmbedResp = await this.createEmbedding([qa])
-		log.info(`prosessAnswer1: ${JSON.stringify(qEmbedResp)}`)
-		const qEmb = qEmbedResp[0] // TODO: check if this is correct
-		const topMatches = (await General.findTopKSimilar(qEmb, 2)) as QuestionData[]
-		log.debug(`prosessAnswer2: ${JSON.stringify(topMatches)}`)
-		return {
-			data: topMatches,
-			message: `Found ${topMatches.length}\n\n${topMatches
-				.map((item) => `${item.question}: ${item.answer}`)
-				.join("\n")}`
+		try {
+			log.debug(`Creating embeddings for ${texts.length} texts`)
+
+			const response = await fetch(`${config.ai.baseURL}${config.ai.embed}`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${config.ai.key}`
+				},
+				body: JSON.stringify({ model: config.ai.modelEmbed, input: texts })
+			})
+
+			if (!response.ok) {
+				const errorText = await response.text()
+				throw new Error(`Embedding API error ${response.status}: ${errorText}`)
+			}
+
+			const json = await response.json()
+
+			if (!Array.isArray(json.embeddings)) {
+				throw new Error(`Unexpected embedding response format`)
+			}
+
+			return json.embeddings
+		} catch (error) {
+			log.error(`Error creating embeddings: ${error}`)
+			throw error
 		}
 	}
 
-	async prosessCommand(command: string, type: string): Promise<ProsessData> {
-		var qEmbedResp = await this.createEmbedding([command])
-		log.debug(`prosessCommand1: ${JSON.stringify(qEmbedResp)}`)
-		const qEmb = qEmbedResp[0] // TODO: check if this is correct
-		const topMatches = (await General.findTopKSimilar(qEmb, 2, {
-			typeEngine: getTypeGameEngine(type)
-		} as CommandData)) as CommandData[]
+	/**
+	 * Process item search request
+	 * @param search - Search query
+	 * @param category - Item category
+	 * @returns Search results
+	 */
+	async processItemSearch(search: string, category: string): Promise<ProcessResult> {
+		try {
+			const detectedLang = await detectLang(search)
+			const language = LanguageGame(detectedLang)
 
-		const sanitized: any[] = topMatches.map((match) => {
+			const results = await General.findItem({
+				search: search,
+				limit: MAX_SEARCH_RESULTS,
+				split: true,
+				type: getTypeItem(category),
+				lang: language
+			})
+			log.info(`Item search results: ${JSON.stringify(results)}`)
+
+			if (!results.data || results.data.length === 0) {
+				return {
+					data: null,
+					message: `No items found matching "${search}" in category "${category || "any"}"`
+				}
+			}
+
+			const formattedResults = results.data.map((item) => `${item.name} (ID: ${item.id})`).join("\n")
+
 			return {
+				data: results.data,
+				message: `Found ${results.data.length} items:\n${formattedResults}`
+			}
+		} catch (error) {
+			log.error(`Error processing item search: ${error}`)
+			return {
+				data: null,
+				message: `Error searching for items: ${error}`
+			}
+		}
+	}
+
+	/**
+	 * Process document/answer search
+	 * @param question - Question to search for
+	 * @returns Top matching answers
+	 */
+	async processDocumentSearch(question: string): Promise<ProcessResult> {
+		try {
+			log.info(`Processing document search for: ${question}`)
+
+			const embeddings = await this.createEmbedding([question])
+			const questionEmbedding = embeddings[0]
+
+			const topMatches = (await General.findTopKSimilar(
+				questionEmbedding,
+				TypeDocumentation.Question,
+				{},
+				SIMILARITY_MATCHES
+			)) as QuestionData[]
+			log.info(`Found matches: ${JSON.stringify(topMatches)}`)
+
+			if (!topMatches || topMatches.length === 0) {
+				return {
+					data: null,
+					message: `No relevant information found for "${question}"`
+				}
+			}
+
+			const formattedMatches = topMatches.map((item) => ({
+				question: item.question,
+				answer: item.answer
+			}))
+
+			return {
+				data: formattedMatches,
+				message: `Found ${topMatches.length} relevant answers:\n\n${topMatches
+					.map((item) => `Q: ${item.question}\nA: ${item.answer}`)
+					.join("\n\n")}`
+			}
+		} catch (error) {
+			log.error(`Error processing document search: ${error}`)
+			return {
+				data: null,
+				message: `Error searching documentation: ${error}`
+			}
+		}
+	}
+
+	/**
+	 * Process command search
+	 * @param command - Command to search for
+	 * @param type - Game type
+	 * @returns Matching commands
+	 */
+	async processCommandSearch(command: string, type: string): Promise<ProcessResult> {
+		try {
+			log.info(`Processing command search: "${command}" for game type "${type}"`)
+
+			const embeddings = await this.createEmbedding([command])
+			log.info(`Command embeddings: ${JSON.stringify(embeddings)}`)
+
+			const commandEmbedding = embeddings[0]
+
+			const searchParams: Partial<CommandData> = {
+				typeEngine: getTypeGameEngine(type)
+			}
+
+			const topMatches = (await General.findTopKSimilar(
+				commandEmbedding,
+				TypeDocumentation.Command,
+				searchParams,
+				SIMILARITY_MATCHES
+			)) as CommandData[]
+			log.info(`Found command matches: ${JSON.stringify(topMatches)}`)
+
+			if (!topMatches || topMatches.length === 0) {
+				return {
+					data: null,
+					message: `No commands found matching "${command}" for game type "${type || "any"}"`
+				}
+			}
+
+			// Format data for easier consumption by the AI
+			const sanitizedMatches = topMatches.map((match) => ({
 				command: match.command,
 				description: match.description,
 				usage: match.usage,
-				type: getStringTypeGameEngine(match.typeEngine) // so bot can understand
-			}
-		})
-		log.info(`prosessCommand2: ${JSON.stringify(sanitized)}`)
+				type: getStringTypeGameEngine(match.typeEngine)
+			}))
 
-		return {
-			data: topMatches,
-			message: `Found ${topMatches.length}\n\n${topMatches
-				.map((item) => `${item.command}: ${item.description} (${item.usage})`)
-				.join("\n")}`
+			return {
+				data: sanitizedMatches,
+				message: `Found ${topMatches.length} commands:\n\n${sanitizedMatches
+					.map(
+						(item) =>
+							`Command: ${item.command}\nDescription: ${item.description}\nUsage: ${item.usage}\nGame: ${item.type}`
+					)
+					.join("\n\n")}`
+			}
+		} catch (error) {
+			log.error(`Error processing command search: ${error}`)
+			return {
+				data: null,
+				message: `Error searching for commands: ${error}`
+			}
 		}
 	}
 
-	async openChat(
+	/**
+	 * Manage conversation history
+	 * @param uid - User ID
+	 * @param reset - Whether to reset the conversation
+	 * @returns Current conversation messages
+	 */
+	private getConversation(uid: string, reset: boolean = false): ChatCompletionMessageParam[] {
+		if (reset || !this.conversations.has(uid)) {
+			const newConversation: ChatCompletionMessageParam[] = [
+				{ role: "system", content: OPENAI_CONFIG.systemPrompt }
+			]
+			this.conversations.set(uid, newConversation)
+			log.info(`${uid}: ${reset ? "Reset" : "Started new"} conversation`)
+			return newConversation
+		}
+
+		const conversation = this.conversations.get(uid)!
+
+		// Trim conversation if it gets too long
+		if (conversation.length > MAX_HISTORY_LENGTH * 2) {
+			// Keep system prompt and trim oldest messages
+			const trimmed = [conversation[0], ...conversation.slice(-(MAX_HISTORY_LENGTH * 2 - 1))]
+			this.conversations.set(uid, trimmed)
+			log.info(`${uid}: Trimmed conversation history from ${conversation.length} to ${trimmed.length} messages`)
+			return trimmed
+		}
+
+		return conversation
+	}
+
+	/**
+	 * Process AI chat
+	 * @param message - User message
+	 * @param uid - User ID
+	 * @param returnJson - Whether to return JSON response
+	 * @param remember - Whether to remember conversation history
+	 * @returns Chat response
+	 */
+	async chat(
 		message: string,
 		uid: string,
-		json: boolean = false,
-		remember: boolean = false,
-		loop: boolean = false
-	): Promise<string | ResponChatData> {
-		// 1. Check if the user is in a conversation
-		let conv = this.conversation.get(uid) || []
-		if (conv.length === 0) {
-			conv.push({ role: "system", content: openaiConfig.systemPrompt })
-			log.info(`${uid} started conversation with new session`)
-		} else {
-			if (!remember) {
-				// remove all message and start with system prompt & user question
-				conv = []
-				conv.push({ role: "system", content: openaiConfig.systemPrompt })
-				log.info(`${uid} started conversation with reset history`)
-			} else [log.info(`${uid} resume conversation with ${conv.length} messages:`, conv)]
+		returnJson: boolean = false,
+		remember: boolean = true
+	): Promise<string | ChatResponse> {
+		if (!this.initialized) {
+			await this.init()
 		}
 
-		conv.push({ role: "user", content: message })
-		log.info(`${uid} try ask > ${message}`)
+		try {
+			// Get or create conversation
+			const conversation = this.getConversation(uid, !remember)
 
-		// 2. answer the question and call the tool
-		const first = await this.ask.chat.completions.create({
-			model: config.ai.modelAsk,
-			messages: conv,
-			tools: openaiConfig.tools,
-			temperature: 0.7,
-			max_tokens: 800
-		})
-		log.warn(`${JSON.stringify(first)}`)
+			// Add user message
+			conversation.push({ role: "user", content: message })
+			log.info(`${uid} > User: ${message}`)
 
-		var choice = first.choices[0]
-		const msg = choice.message!
-
-		log.info(
-			`Bot response > ${msg.content} to ${uid} (Reason: ${choice.finish_reason}) (${first.choices.length}x choices?)`
-		)
-
-		var prosess: ProsessData = {
-			message: `No response from AI`,
-			data: null
-		}
-
-		var typeResponse = TypeResponse.None
-
-		if (choice.finish_reason === "tool_calls" && msg.tool_calls?.length) {
-			log.info(`${uid} > Bot found ${msg.tool_calls.length}x tool need to call`)
-
-			const call = msg.tool_calls[0]
-			const { name, arguments: argsStr } = call.function!
-			const args = JSON.parse(argsStr ?? "{}")
-
-			log.info(`${uid} > Bot try call tool > ${name} > ${argsStr}`)
-
-			if (name == "find_id") {
-				prosess = await this.prosessItem(args.search, args.category)
-				typeResponse = TypeResponse.Item
-			} else if (name == "find_document") {
-				prosess = await this.prosessAnswer(args.question)
-				typeResponse = TypeResponse.Answer
-			} else if (name == "find_command") {
-				prosess = await this.prosessCommand(args.command, args.type)
-				typeResponse = TypeResponse.CommandHelper
-			} else {
-				log.warn(`${uid} > Tool called unkow: ${name} (${argsStr})`)
-			}
-
-			conv.push({
-				role: "tool",
-				tool_call_id: call.id,
-				content: JSON.stringify(prosess.data) // prosess.message ||
-			})
-		} else {
-			//log.warn(`${uid} > Bot response: ${msg.content}`)
-			conv.push({ role: "assistant", content: msg.content })
-		}
-
-		// 3. Check if the bot response is finished
-		if (choice.finish_reason != "stop") {
-			const chatResp = await this.ask.chat.completions.create({
+			// Send initial request to get tool calls
+			const initialResponse = await this.openaiClient.chat.completions.create({
 				model: config.ai.modelAsk,
-				messages: conv
+				messages: conversation,
+				tools: OPENAI_CONFIG.tools,
+				temperature: 0.7,
+				max_tokens: 800
 			})
-			log.info(`${JSON.stringify(chatResp)}`)
-			choice = chatResp.choices[0]
-		}
 
-		if(choice.finish_reason == "stop") {
-			this.conversation.delete(uid)
-			log.info(`${uid} > Bot response finished, delete conversation`)
-		}
+			const initialChoice = initialResponse.choices[0]
+			const initialMessage = initialChoice.message
 
-		var chatRaw = choice.message?.content || prosess.message
-		var chatResponse = splitThinkContent(chatRaw)
-		log.info(`${uid} > ${choice.finish_reason} > `, chatResponse)
+			log.info(
+				`${uid} > Initial AI response: ${initialMessage.content || "[No content]"} (Finish reason: ${
+					initialChoice.finish_reason
+				})`
+			)
 
-		if (json) {
-			return {
-				uid,
-				ask: message,
-				message: chatResponse.response,
-				think: chatResponse.think,
-				type: typeResponse,
-				data: prosess.data,
-				totalChat: conv.length
+			let processResult: ProcessResult = {
+				message: "No tool calls were made",
+				data: null
 			}
-		} else {
-			return chatResponse.response
+
+			let responseType = ResponseType.Chat
+
+			// Handle tool calls if present
+			if (initialChoice.finish_reason === "tool_calls" && initialMessage.tool_calls?.length) {
+				const toolCall = initialMessage.tool_calls[0]
+				const { name, arguments: argsStr } = toolCall.function!
+				const args = JSON.parse(argsStr || "{}")
+
+				log.info(`${uid} > Tool call: ${name}(${argsStr})`)
+
+				// Process different tool types
+				switch (name) {
+					case "find_id":
+						processResult = await this.processItemSearch(args.search, args.category)
+						responseType = ResponseType.Item
+						break
+					case "find_document":
+						processResult = await this.processDocumentSearch(args.question)
+						responseType = ResponseType.Answer
+						break
+					case "find_command":
+						processResult = await this.processCommandSearch(args.command, args.type)
+						responseType = ResponseType.CommandHelper
+						break
+					default:
+						log.warn(`${uid} > Unknown tool called: ${name}`)
+				}
+
+				// Add tool response to conversation
+				conversation.push({
+					role: "tool",
+					tool_call_id: toolCall.id,
+					content: JSON.stringify(processResult.data)
+				})
+
+				// Add assistant response to conversation
+				if (initialMessage.content) {
+					conversation.push({
+						role: "assistant",
+						content: initialMessage.content
+					})
+				}
+			} else if (initialMessage.content) {
+				// Add assistant response if no tool calls
+				conversation.push({
+					role: "assistant",
+					content: initialMessage.content
+				})
+			}
+
+			// Get final response if needed
+			let finalChoice = initialChoice
+			let finalMessage = initialMessage
+
+			if (initialChoice.finish_reason !== "stop") {
+				log.info(`${uid} > Getting final response...`)
+
+				const finalResponse = await this.openaiClient.chat.completions.create({
+					model: config.ai.modelAsk,
+					messages: conversation,
+					temperature: 0.7,
+					max_tokens: 800
+				})
+
+				finalChoice = finalResponse.choices[0]
+				finalMessage = finalChoice.message
+
+				log.info(
+					`${uid} > Final AI response: ${finalMessage.content || "[No content]"} (Finish reason: ${
+						finalChoice.finish_reason
+					})`
+				)
+
+				// Add final response to conversation if different
+				if (finalMessage.content && finalMessage.content !== initialMessage.content) {
+					conversation.push({
+						role: "assistant",
+						content: finalMessage.content
+					})
+				}
+			}
+
+			// Clean up if finished
+			if (finalChoice.finish_reason === "stop") {
+				// Keep conversation in memory unless explicitly requested
+				if (!remember) {
+					this.conversations.delete(uid)
+					log.info(`${uid} > Conversation ended and deleted`)
+				}
+			}
+
+			// Process final response
+			const finalContent = finalMessage.content || processResult.message
+			const { response, think } = extractThinkingContent(finalContent)
+
+			log.info(`${uid} > Response processed: ${response.substring(0, 100)}${response.length > 100 ? "..." : ""}`)
+			if (think) {
+				log.info(`${uid} > Thinking: ${think.substring(0, 100)}${think.length > 100 ? "..." : ""}`)
+			}
+
+			// Return response
+			if (returnJson) {
+				return {
+					uid,
+					ask: message,
+					message: response,
+					think: think,
+					type: responseType,
+					data: processResult.data,
+					totalChat: conversation.length
+				}
+			} else {
+				return response
+			}
+		} catch (error) {
+			log.error(`Error in chat: ${error}`)
+
+			const errorMessage = `Sorry, I encountered an error while processing your request: ${error}`
+
+			if (returnJson) {
+				return {
+					uid,
+					ask: message,
+					message: errorMessage,
+					think: `Error: ${error}`,
+					type: ResponseType.None,
+					data: null,
+					totalChat: this.conversations.has(uid) ? this.conversations.get(uid)!.length : 0
+				}
+			} else {
+				return errorMessage
+			}
 		}
 	}
 }
 
-const _ = new AI()
-export default _
+// Create singleton instance
+const aiInstance = new AI()
+export default aiInstance
