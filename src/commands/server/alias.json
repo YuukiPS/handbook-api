@@ -1,4 +1,5 @@
 {
 	"p": "ping",
-	"br": "buildrelic"
+	"br": "buildrelic",
+	"ds": "dataset"
 }

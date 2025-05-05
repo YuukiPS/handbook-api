@@ -15,8 +15,12 @@ export const _ = acfg({
 	},
 	ai:{
 		key: "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-		model: "qwen3:0.6b",
-		baseURL: "https://xxx/ollama/v1/", // need tool so use https://ollama.com/search?c=tools&o=newest
+		modelAsk: "qwen3:0.6b", // need tool so use https://ollama.com/search?c=tools&o=newest
+		modelEmbed: "nomic-embed-text", // need embed so use https://ollama.com/search?c=embedding&o=newest
+		baseURL: "https://xxx",
+		baseBackupUrl: "https://xxx", // if home server down, use cloud server
+		ask: "/ollama/v1/",
+		embed: "/ollama/api/embed",
 	},
 	notification: {
 		id_channel: "",

@@ -9,7 +9,16 @@ import {
 	isValidUrl,
 	readJsonFileCached
 } from "@UT/library"
-import { BookRsp, GitLabCommit, ItemData, Prop, PropRsp } from "@UT/response"
+import {
+	BookRsp,
+	DocumentationData,
+	GitLabCommit,
+	ItemData,
+	Prop,
+	PropRsp,
+	QuestionData,
+	TypeDocumentation
+} from "@UT/response"
 // thrid party
 import axios from "axios"
 import fs from "fs/promises"
@@ -372,12 +381,110 @@ export const _ = {
 		// if not rebuild, only insert when no matching doc found
 		const existing = await collection.findOne(query as Filter<T>)
 		if (!existing) {
+			if (obj.id == 0) {
+				// set id to 0 for auto increment
+				obj.id = await this.getCount("book")
+			}
+
 			await collection.insertOne(obj as OptionalUnlessRequiredId<T>)
 			return true
 		} else {
 			log.warn("itemAdd: already exists", { query })
 			return false
 		}
+	},
+	addDoc: async function <T extends DocumentationData>(
+		obj: T,
+		rebuild: boolean = false,
+		replace: boolean = false,
+		extraFilter: Omit<Partial<T>, "id"> = {} as Omit<Partial<T>, "id">
+	): Promise<boolean> {
+		await DBMongo.isConnected()
+		const collection = DBMongo.getCollection<T>("documentation")
+		if (!collection) {
+			log.errorNoStack("api_db_nofound_collection_book")
+			return false
+		}
+
+		const { id } = obj
+		// now matching on id, type AND game, plus any extraFilter fields
+		const query = { id, ...extraFilter } as Partial<T>
+
+		if (rebuild) {
+			if (replace) {
+				// full-replace upsert
+				await collection.replaceOne(query as Filter<T>, obj, { upsert: true })
+			} else {
+				// partial $set upsert
+				await collection.updateOne(query as Filter<T>, { $set: obj }, { upsert: true })
+			}
+			return true
+		}
+
+		// if not rebuild, only insert when no matching doc found
+		const existing = await collection.findOne(query as Filter<T>)
+		if (!existing) {
+			if (obj.id == 0) {
+				// set id to 0 for auto increment
+				obj.id = await this.getCount("documentation")
+			}
+
+			await collection.insertOne(obj as OptionalUnlessRequiredId<T>)
+			return true
+		} else {
+			log.warn("itemDoc: already exists", { query })
+			return false
+		}
+	},
+	findTopKSimilarQuestions: async function (
+		queryEmbedding: number[],
+		k = 5
+	): Promise<{ question: string; answer: string }[]> {
+		const collection = DBMongo.getCollection<QuestionData>("documentation")
+		if (!collection) {
+			throw new Error("Collection not found")
+		}
+
+		const pipeline = [
+			// 1) filter to Question docs
+			{ $match: { type: TypeDocumentation.Question } },
+
+			// 2) compute cosine-similarity score
+			{
+				$addFields: {
+					score: {
+						$function: {
+							lang: "js",
+							body: `
+					function(docEmb, qryEmb) {
+					  let dot = 0, magA = 0, magB = 0;
+					  for (let i = 0; i < docEmb.length; ++i) {
+						dot  += docEmb[i] * qryEmb[i];
+						magA += docEmb[i] * docEmb[i];
+						magB += qryEmb[i] * qryEmb[i];
+					  }
+					  if (magA === 0 || magB === 0) return 0;
+					  return dot / (Math.sqrt(magA) * Math.sqrt(magB));
+					}
+				  `,
+							args: ["$embedding", queryEmbedding]
+						}
+					}
+				}
+			},
+
+			// 3) sort by highest similarity
+			{ $sort: { score: -1 } },
+
+			// 4) take the top K
+			{ $limit: k },
+
+			// 5) project only question & answer
+			{ $project: { _id: 0, question: 1, answer: 1 } }
+		]
+
+		// Note: though the pipeline computes `score`, we don't return it here
+		return collection.aggregate<{ question: string; answer: string }>(pipeline).toArray()
 	},
 	addMultiLangNamesAsObject: function (
 		hash: string,

@@ -474,7 +474,7 @@ export function getAllTypeItem(): String[] {
 		.filter((value) => typeof value === "string") as string[]
 }
 export function getTypeItem(value: string): number {
-	if(isEmpty(value)) return 0
+	if (isEmpty(value)) return 0
 
 	// 1) Normalize input: trim, lowercase, then capitalize first letter
 	const normalize = (str: string) =>
@@ -511,7 +511,7 @@ export interface ItemData {
 	game: number // 1=genshin, 2=starrail
 	name: Record<string, string> // name item
 	desc: Record<string, string> // desc item
-	desc2: Record<string, string> // desc item
+	desc2: Record<string, string> // desc item (TODO: use embedding in name,desc?)
 	icon: string // icon item
 }
 export interface ItemAvatar extends ItemData {
@@ -608,7 +608,7 @@ export interface ItemStage extends ItemData {
 	stageLevel?: number
 }
 
-// API SR only
+// Gen Relic
 export interface GenRelicResult {
 	id: number
 	count: number
@@ -617,10 +617,12 @@ export interface GenRelicResult {
 	sub: string[]
 	raw: BuildRelicData
 }
+
+// Build
 export interface BuildData {
 	/** Use this as the MongoDB _id */
 	_id: number
-	owner: number
+	owner: number // account id (Yuuki account)
 	title: string
 	avatar?: BuildAvatarData
 	equipment?: BuildEquipmentData // light cone
@@ -660,4 +662,55 @@ export interface BuildRsp {
 	message: string
 	retcode: number
 	data: BuildData[] | null
+}
+
+// Documentation
+export enum TypeDocumentation {
+	None = 0,
+	Question = 1,
+	Command = 2,
+	Guide = 3,
+	Blog = 4
+}
+export function getAllTypeDocumentation(): String[] {
+	return Object.keys(TypeDocumentation)
+		.map((key) => TypeDocumentation[key as keyof typeof TypeDocumentation])
+		.filter((value) => typeof value === "string") as string[]
+}
+// Note: CP/LC now its same, GIO/VIA now its same
+export enum GameEngine {
+	None = 0,
+	GC = 1,
+	GIO = 2,
+	CP = 3, // outdate ts ps
+	VIA = 4, // emulator gio
+	LC = 5,
+	BP = 6 // blue archive aka BaPs
+}
+export function getAllGameEngine(): String[] {
+	return Object.keys(GameEngine)
+		.map((key) => GameEngine[key as keyof typeof GameEngine])
+		.filter((value) => typeof value === "string") as string[]
+}
+export interface DocumentationData {
+	id: number
+	owner: number // account id (Yuuki account)
+	time: number
+	update: number
+	vote: number
+	view: number // view count (may be useful for frequently searched questions)
+	tag: string[]
+	type: TypeDocumentation
+	language: string
+	embedding: number[] // https://platform.openai.com/docs/models/embeddings
+}
+export interface QuestionData extends DocumentationData {
+	question: string
+	answer: string
+}
+export interface CommandData extends DocumentationData {
+	command: string
+	description: string
+	usage: string
+	typeEngine: number // use use GameEngine enum?
 }
