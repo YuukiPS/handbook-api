@@ -1,5 +1,13 @@
 import Logger from "@UT/logger"
-import { CommandData, getAllTypeItem, getTypeItem, QuestionData } from "@UT/response"
+import {
+	CommandData,
+	getAllGameEngine,
+	getAllTypeItem,
+	getStringTypeGameEngine,
+	getTypeGameEngine,
+	getTypeItem,
+	QuestionData
+} from "@UT/response"
 import config from "@UT/config"
 import { detectLang, LanguageGame } from "@UT/library"
 // third party
@@ -93,6 +101,33 @@ const openaiConfig = {
 					required: ["question"]
 				}
 			}
+		},
+		{
+			type: "function",
+			function: {
+				name: "find_command",
+				description:
+					"ONLY use this to search for specific command syntax, usage, and descriptions. " +
+					"This is for finding how to use specific commands in the game console, NOT for general game questions or issues.",
+				parameters: {
+					type: "object",
+					properties: {
+						command: {
+							type: "string",
+							description:
+								'The exact name or part of the command to search for (e.g., "give", "spawn", "weather").'
+						},
+						type: {
+							type: "string",
+							description:
+								'The game server type for the command. Valid values: "gc" (Grasscutter/Genshin), ' +
+								'"gio" (Genshin official), or "lc" (LunarCore/HSR).',
+							enum: getAllGameEngine()
+						}
+					},
+					required: ["command"]
+				}
+			}
 		}
 	] as ChatCompletionTool[]
 }
@@ -114,17 +149,26 @@ function splitThinkContent(message: string): { response: string; think: string }
 	}
 }
 
+enum TypeResponse {
+	None = 0,
+	Chat = 1, // normal chat without list menu
+	Item = 2, // need call sub item
+	Answer = 3,
+	CommandHelper = 4
+}
+
 interface ProsessData {
 	message: string
 	data: null | any
 }
 interface ResponChatData {
-	ask: string
 	uid: string
+	ask: string
 	message: string
 	think: string
+	type: TypeResponse
 	data: null | any
-	total: number
+	totalChat: number
 }
 
 class AI {
@@ -152,85 +196,47 @@ class AI {
 		//await this.embedDataset(dataset)
 		log.info(`Dataset embedded`)
 	}
-	
+
 	async embedDataset(items: QuestionData[] | CommandData[]) {
-		// 1. Extract texts to embed
-		const texts: string[] = []
-		items.forEach((item) => {
-			if ("question" in item) {
-				texts.push(item.question)
-			} else if (item.command) {
-				texts.push(item.command)
-			}
-		})
-		// 2. Fire request
+		const texts = items
+			.map((item) =>
+				"question" in item
+					? `${item.question} ${item.answer}`
+					: `${item.command} ${item.description} ${item.usage} ${item.type}`
+			)
+			.filter(Boolean)
 		const resp = await fetch(`${config.ai.baseURL}${config.ai.embed}`, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
 				Authorization: `Bearer ${config.ai.key}`
 			},
-			body: JSON.stringify({
-				model: config.ai.modelEmbed,
-				input: texts
-			})
+			body: JSON.stringify({ model: config.ai.modelEmbed, input: texts })
 		})
-		// 3. Debug status + raw body
-		//log.info(`← Status: ${resp.status} ${resp.statusText}`)
-		const raw = await resp.text()
-		//log.info(`← Raw body: ${raw}`)
-		if (!resp.ok) {
-			throw new Error(`Embedding failed ${resp.status}: ${raw}`)
-		}
-		// 4. Parse JSON & inspect its shape
-		const json = JSON.parse(raw)
-		log.info(`← Parsed JSON keys: ${Object.keys(json).join(", ")}`)
-		// 5. Extract your embeddings array
-		// Try both possibilities; adjust to match what you actually saw in Raw body.
-		const embeddings: number[][] = Array.isArray(json.embeddings)
-			? json.embeddings
-			: Array.isArray(json.data) && Array.isArray(json.data[0]?.embedding)
-			? json.data.map((d: any) => d.embedding)
-			: []
-
-		if (embeddings.length !== items.length) {
+		if (!resp.ok) throw new Error(`Embedding failed ${resp.status}: ${await resp.text()}`)
+		const json = await resp.json()
+		const embeddings = json.embeddings || json.data?.map((d: any) => d.embedding) || []
+		if (embeddings.length !== items.length)
 			throw new Error(`Expected ${items.length} embeddings, got ${embeddings.length}`)
-		}
-
-		// 6. Assign back into your dataset
-		embeddings.forEach((vec, i) => {
-			items[i].embedding = vec
+		embeddings.forEach((vec: number[], i: number) => {
+			;(items[i] as QuestionData | CommandData).embedding = vec
 		})
-
 		log.info(`✔︎ Embedded ${items.length} items successfully`)
 	}
 
 	async createEmbedding(texts: string[]): Promise<number[][]> {
-		const url = new URL(config.ai.embed, config.ai.baseURL).toString()
-		log.info(`→ Embedding ${texts.length} items at URL: ${url}`)
-		const resp = await fetch(url, {
+		const resp = await fetch(`${config.ai.baseURL}${config.ai.embed}`, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
 				Authorization: `Bearer ${config.ai.key}`
 			},
-			body: JSON.stringify({
-				model: config.ai.modelEmbed,
-				input: texts // must be an array of strings
-			})
+			body: JSON.stringify({ model: config.ai.modelEmbed, input: texts })
 		})
-
-		const raw = await resp.text()
-		if (!resp.ok) {
-			throw new Error(`Embedding failed ${resp.status}: ${raw}`)
-		}
-
-		// assume Ollama returns { embeddings: number[][] }
-		const json = JSON.parse(raw)
-		if (!Array.isArray(json.embeddings)) {
-			throw new Error(`Unexpected embedding response shape: ${raw}`)
-		}
-		return json.embeddings as number[][]
+		if (!resp.ok) throw new Error(`Embedding failed ${resp.status}: ${await resp.text()}`)
+		const json = await resp.json()
+		if (!Array.isArray(json.embeddings)) throw new Error(`Unexpected embedding response shape`)
+		return json.embeddings
 	}
 
 	async prosessItem(search: string, category: string): Promise<ProsessData> {
@@ -257,12 +263,38 @@ class AI {
 		var qEmbedResp = await this.createEmbedding([qa])
 		log.info(`prosessAnswer1: ${JSON.stringify(qEmbedResp)}`)
 		const qEmb = qEmbedResp[0] // TODO: check if this is correct
-		const topMatches = await General.findTopKSimilarQuestions(qEmb, 2)
-		log.info(`prosessAnswer2: ${JSON.stringify(topMatches)}`)
+		const topMatches = (await General.findTopKSimilar(qEmb, 2)) as QuestionData[]
+		log.debug(`prosessAnswer2: ${JSON.stringify(topMatches)}`)
 		return {
 			data: topMatches,
 			message: `Found ${topMatches.length}\n\n${topMatches
 				.map((item) => `${item.question}: ${item.answer}`)
+				.join("\n")}`
+		}
+	}
+
+	async prosessCommand(command: string, type: string): Promise<ProsessData> {
+		var qEmbedResp = await this.createEmbedding([command])
+		log.debug(`prosessCommand1: ${JSON.stringify(qEmbedResp)}`)
+		const qEmb = qEmbedResp[0] // TODO: check if this is correct
+		const topMatches = (await General.findTopKSimilar(qEmb, 2, {
+			typeEngine: getTypeGameEngine(type)
+		} as CommandData)) as CommandData[]
+
+		const sanitized: any[] = topMatches.map((match) => {
+			return {
+				command: match.command,
+				description: match.description,
+				usage: match.usage,
+				type: getStringTypeGameEngine(match.typeEngine) // so bot can understand
+			}
+		})
+		log.info(`prosessCommand2: ${JSON.stringify(sanitized)}`)
+
+		return {
+			data: topMatches,
+			message: `Found ${topMatches.length}\n\n${topMatches
+				.map((item) => `${item.command}: ${item.description} (${item.usage})`)
 				.join("\n")}`
 		}
 	}
@@ -313,6 +345,8 @@ class AI {
 			data: null
 		}
 
+		var typeResponse = TypeResponse.None
+
 		if (choice.finish_reason === "tool_calls" && msg.tool_calls?.length) {
 			log.info(`${uid} > Bot found ${msg.tool_calls.length}x tool need to call`)
 
@@ -324,16 +358,21 @@ class AI {
 
 			if (name == "find_id") {
 				prosess = await this.prosessItem(args.search, args.category)
+				typeResponse = TypeResponse.Item
 			} else if (name == "find_document") {
 				prosess = await this.prosessAnswer(args.question)
+				typeResponse = TypeResponse.Answer
+			} else if (name == "find_command") {
+				prosess = await this.prosessCommand(args.command, args.type)
+				typeResponse = TypeResponse.CommandHelper
 			} else {
-				log.warn(`${uid} > Tool called: ${name} (${argsStr})`)
+				log.warn(`${uid} > Tool called unkow: ${name} (${argsStr})`)
 			}
 
 			conv.push({
 				role: "tool",
 				tool_call_id: call.id,
-				content: prosess.message || JSON.stringify(prosess.data)
+				content: JSON.stringify(prosess.data) // prosess.message ||
 			})
 		} else {
 			//log.warn(`${uid} > Bot response: ${msg.content}`)
@@ -350,18 +389,24 @@ class AI {
 			choice = chatResp.choices[0]
 		}
 
+		if(choice.finish_reason == "stop") {
+			this.conversation.delete(uid)
+			log.info(`${uid} > Bot response finished, delete conversation`)
+		}
+
 		var chatRaw = choice.message?.content || prosess.message
 		var chatResponse = splitThinkContent(chatRaw)
 		log.info(`${uid} > ${choice.finish_reason} > `, chatResponse)
 
 		if (json) {
 			return {
-				data: prosess.data,
-				ask: message,
 				uid,
+				ask: message,
 				message: chatResponse.response,
 				think: chatResponse.think,
-				total: conv.length
+				type: typeResponse,
+				data: prosess.data,
+				totalChat: conv.length
 			}
 		} else {
 			return chatResponse.response

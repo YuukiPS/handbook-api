@@ -692,6 +692,12 @@ export function getAllGameEngine(): String[] {
 		.map((key) => GameEngine[key as keyof typeof GameEngine])
 		.filter((value) => typeof value === "string") as string[]
 }
+export function getTypeGameEngine(name: string): number {
+	return (GameEngine as any)[name] ?? -1
+}
+export function getStringTypeGameEngine(value: number): string {
+	return (GameEngine as any)[value] ?? "None"
+}
 export interface DocumentationData {
 	id: number
 	owner: number // account id (Yuuki account)
@@ -712,5 +718,5 @@ export interface CommandData extends DocumentationData {
 	command: string
 	description: string
 	usage: string
-	typeEngine: number // use use GameEngine enum?
+	typeEngine: GameEngine // use use GameEngine enum?
 }

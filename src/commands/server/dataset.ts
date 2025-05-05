@@ -3,7 +3,7 @@ import { Command } from "./Interface"
 import AI from "@DB/book/ai"
 import General from "@DB/book/general"
 import fs from "fs"
-import { QuestionData, TypeDocumentation } from "@UT/response"
+import { CommandData, getTypeGameEngine, QuestionData, TypeDocumentation } from "@UT/response"
 import { getTimeV2 } from "@UT/library"
 
 const log = new Logger("/dataset", "blue")
@@ -13,7 +13,7 @@ const log = new Logger("/dataset", "blue")
 
 const FOLDER = `./src/server/web/public/resources/general`
 
-interface CommandData {
+interface CommandDataOld {
 	command: string
 	description: string
 	usage: string
@@ -25,7 +25,7 @@ interface QAData {
 	answer: string
 }
 
-type DataPair = CommandData | QAData
+type DataPair = CommandDataOld | QAData
 
 function parseMarkdown(filename: string, section: string, startsWith: string, fields: string[]): DataPair[] {
 	const markdown = fs.readFileSync(filename, "utf-8")
@@ -55,7 +55,7 @@ function parseLine(line: string, nextLine: string, fields: string[], startsWith:
 		return qaData
 	} else {
 		const parts = line.split("|").map((part) => part.trim())
-		const commandData: CommandData = {
+		const commandData: CommandDataOld = {
 			command: parts[1] || "",
 			description: parts[2] || "",
 			usage: parts[3] || "",
@@ -68,18 +68,54 @@ function parseLine(line: string, nextLine: string, fields: string[], startsWith:
 
 export default async function handle(command: Command) {
 	log.log(`Dataset: ${command.args.join(" ")}`)
+	const commandUsagePairs = parseMarkdown(`${FOLDER}/dataset.md`, "Command", "| `", [
+		"command",
+		"description",
+		"usage",
+		"type"
+	]) as CommandDataOld[]
+	var toadd: CommandData[] = []
+	for (const pair of commandUsagePairs) {
+		log.log(`Command: ${pair.command}`)
+		log.log(`Description: ${pair.description}`)
+		log.log(`Usage: ${pair.usage}`)
+		log.log(`Type: ${pair.type}`)
+		var cmd: CommandData = {
+			command: pair.command.replace(/^`+|`+$/g, ""),
+			description: pair.description,
+			usage: pair.usage.replace(/^`+|`+$/g, ""),
+			typeEngine: getTypeGameEngine(pair.type),
+			id: 0, // set 0 for auto increment
+			owner: 110000000, // yuuki account
+			time: getTimeV2(true),
+			update: getTimeV2(true),
+			vote: 0,
+			view: 0,
+			tag: [`Command`],
+			type: TypeDocumentation.Command,
+			language: "EN",
+			embedding: []
+		}
+		toadd.push(cmd)
+	}
+	await AI.embedDataset(toadd)
+	log.info(`Add ${toadd.length} command to database`)
+	for (const doc of toadd) {
+		var isAdd = await General.addDoc(doc)
+		log.info(`Add ${doc.command} to database? `, isAdd)
+	}
 
 	const questionAnswerPairs = parseMarkdown(`${FOLDER}/dataset.md`, "Knowledge", "Q:", [
 		"question",
 		"answer"
 	]) as QAData[]
 	//log.log(`QA: `, questionAnswerPairs)
-	var toadd: QuestionData[] = []
+	var toadd2: QuestionData[] = []
 	for (const pair of questionAnswerPairs) {
 		log.log(`Q: ${pair.question}`)
 		log.log(`A: ${pair.answer}`)
 		var ask: QuestionData = {
-			question: pair.question.endsWith('\\') ? pair.question.slice(0, -1) : pair.question,
+			question: pair.question.endsWith("\\") ? pair.question.slice(0, -1) : pair.question,
 			answer: pair.answer,
 			id: 0, // set 0 for auto increment
 			owner: 110000000, // yuuki account
@@ -92,13 +128,12 @@ export default async function handle(command: Command) {
 			language: "EN",
 			embedding: []
 		}
-		toadd.push(ask)
+		toadd2.push(ask)
 	}
-	await AI.embedDataset(toadd)
+	await AI.embedDataset(toadd2)
 	log.info(`Add ${toadd.length} question to database`)
-	for (const doc of toadd) {
-		var isAdd = await General.addDoc(doc);
+	for (const doc of toadd2) {
+		var isAdd = await General.addDoc(doc)
 		log.info(`Add ${doc.question} to database? `, isAdd)
-		
 	}
 }

@@ -436,20 +436,28 @@ export const _ = {
 			return false
 		}
 	},
-	findTopKSimilarQuestions: async function (
+	findTopKSimilar: async function (
 		queryEmbedding: number[],
+		type: TypeDocumentation,
+		filter: Partial<DocumentationData> = {},
 		k = 5
-	): Promise<{ question: string; answer: string }[]> {
-		const collection = DBMongo.getCollection<QuestionData>("documentation")
+	): Promise<Omit<DocumentationData, "embedding">[]> {
+		const collection = DBMongo.getCollection<DocumentationData>("documentation")
 		if (!collection) {
 			throw new Error("Collection not found")
 		}
 
-		const pipeline = [
-			// 1) filter to Question docs
-			{ $match: { type: TypeDocumentation.Question } },
+		// Remove `embedding` from the filter if someone accidentally passed it
+		const { embedding: _drop, ...safeFilter } = filter
 
-			// 2) compute cosine-similarity score
+		// Always match on `type`, plus any extra fields in `safeFilter`
+		const matchCriteria: Record<string, any> = { type, ...safeFilter }
+
+		const pipeline = [
+			// 1) filter by type and any other user‑provided fields
+			{ $match: matchCriteria },
+
+			// 2) compute cosine‑similarity score
 			{
 				$addFields: {
 					score: {
@@ -479,12 +487,11 @@ export const _ = {
 			// 4) take the top K
 			{ $limit: k },
 
-			// 5) project only question & answer
-			{ $project: { _id: 0, question: 1, answer: 1 } }
+			// 5) drop the embedding vector (and the temporary score)
+			{ $project: { embedding: 0, score: 0 } }
 		]
 
-		// Note: though the pipeline computes `score`, we don't return it here
-		return collection.aggregate<{ question: string; answer: string }>(pipeline).toArray()
+		return collection.aggregate<Omit<DocumentationData, "embedding">>(pipeline).toArray()
 	},
 	addMultiLangNamesAsObject: function (
 		hash: string,
