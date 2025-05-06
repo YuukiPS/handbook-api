@@ -10,13 +10,19 @@ import {
 	TypeDocumentation
 } from "@UT/response"
 import config, { GetAiServer } from "@UT/config"
-import { detectLang, LanguageGame } from "@UT/library"
+import { detectLang, isEmpty, LanguageGame } from "@UT/library"
 // third party
 import { isMainThread } from "worker_threads"
 import OpenAI from "openai"
-import { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions"
+import {
+	ChatCompletion,
+	ChatCompletionChunk,
+	ChatCompletionMessageParam,
+	ChatCompletionTool
+} from "openai/resources/chat/completions"
 // database
 import General from "@DB/book/general"
+import { on } from "events"
 
 const log = new Logger(`AI`)
 
@@ -155,24 +161,16 @@ const OPENAI_CONFIG = {
 	] as ChatCompletionTool[]
 }
 
-/**
- * Type definitions
- */
 enum ResponseType {
-	None = 0,
-	Chat = 1, // normal chat without list menu
-	Item = 2, // need call sub item
-	Answer = 3,
-	CommandHelper = 4
+	None,
+	Chat,
+	Item,
+	Answer,
+	CommandHelper
 }
-
 interface ProcessResult {
 	message: string
-	data: null | any
-}
-interface MessageContent {
-	response: string
-	think: string
+	data: any | null
 }
 
 interface ChatUserDataReq {
@@ -181,7 +179,7 @@ interface ChatUserDataReq {
 	returnJson?: boolean
 	remember?: boolean
 }
-interface ChatUserDataRsp {
+export interface ChatUserDataRsp {
 	uid: string
 	ask: string
 	message: string
@@ -202,196 +200,166 @@ export interface ChatServerRsp {
 	origin: string
 }
 
-/**
- * Extract thinking content from AI response
- * @param message - The raw message from the AI
- * @returns Object containing visible response and thinking content
- */
-function extractThinkingContent(message: string): MessageContent {
-	const thinkRegex = /<think>([\s\S]*?)<\/think>/g
-	const thinkParts: string[] = []
-
-	const response = message
-		.replace(thinkRegex, (_match, content) => {
-			thinkParts.push(content.trim())
-			return "" // strip out the think block
-		})
-		.trim()
-
-	return {
-		response,
-		think: thinkParts.join("\n")
-	}
-}
-
-/**
- * Main AI class
- * Handles conversation management, tool calls, and embeddings
- */
 class AI {
-	private openaiClient!: OpenAI
-	private conversations: Map<string, ChatCompletionMessageParam[]> = new Map()
-	private initialized: boolean = false
-
-	private urlAsk: string = ""
-	private urlEmbed: string = ""
-	private modelAsk: string = ""
-	private modelEmbed: string = ""
-	private key: string = ""
-	private type: number = 1 // 1 = Ollama, 2 = LM-Studio
-	private temperatureAsk: number = 0.7
-	private temperatureEmbed: number = 0.7
-	private maxTokensAsk: number = 800
-	private maxTokensEmbed: number = 800
-	private maxMatch: number = 2
-	private maxSearch: number = 5
-	private maxHistory: number = 10
+	private client!: OpenAI
+	private convs = new Map<string, ChatCompletionMessageParam[]>()
+	private initialized = false
+	private cfg = {
+		urlAsk: "",
+		urlEmbed: "",
+		modelAsk: "",
+		modelEmbed: "",
+		key: "",
+		type: 1,
+		tempAsk: 0.7,
+		tempEmbed: 0.7,
+		maxTokens: 800,
+		maxMatch: 2,
+		maxSearch: 5,
+		maxHistory: 10
+	}
 
 	constructor() {
-		if (isMainThread) {
-			log.info(`AI system initializing on main thread`)
-			this.init()
-		} else {
-			log.info(`AI running on worker thread`)
+		if (isMainThread) this.init().catch((err) => log.error(`Init failed: ${err}`))
+	}
+
+	private async init() {
+		const server = GetAiServer()
+		if (!server) throw new Error("No AI config found")
+		this.cfg = {
+			urlAsk: `${server.url}/ollama/v1/`,
+			urlEmbed: `${server.url}/ollama/api/embed`,
+			modelAsk: server.model.ask.id,
+			modelEmbed: server.model.embed.id,
+			key: server.key,
+			type: server.type,
+			tempAsk: server.model.ask.temperature,
+			tempEmbed: server.model.embed.temperature,
+			maxTokens: server.model.ask.max_tokens,
+			maxMatch: config.ai.maxMatch,
+			maxSearch: config.ai.maxSearch,
+			maxHistory: config.ai.maxHistory
+		}
+		this.client = new OpenAI({ apiKey: this.cfg.key, baseURL: this.cfg.urlAsk })
+		this.initialized = true
+		log.info(`AI initialized with model ${this.cfg.modelAsk}`)
+	}
+
+	private getConv(uid: string, reset = false) {
+		if (reset || !this.convs.has(uid)) {
+			this.convs.set(uid, [{ role: "system", content: OPENAI_CONFIG.systemPrompt }])
+		}
+		const conv = this.convs.get(uid)!
+		if (conv.length > this.cfg.maxHistory * 2) {
+			this.convs.set(uid, [conv[0], ...conv.slice(-this.cfg.maxHistory * 2 + 1)])
+		}
+		return this.convs.get(uid)!
+	}
+
+	private extractThinking(raw: string) {
+		const parts: string[] = []
+		const resp = raw
+			.replace(/<think>([\s\S]*?)<\/think>/g, (_, c) => {
+				parts.push(c.trim())
+				return ""
+			})
+			.trim()
+		return { response: resp || "", think: parts.join("\n") || "" }
+	}
+
+	private async createEmbedding(texts: string[]) {
+		const res = await fetch(this.cfg.urlEmbed, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.cfg.key}` },
+			body: JSON.stringify({ model: this.cfg.modelEmbed, input: texts })
+		})
+		if (!res.ok) throw new Error(`Embedding failed: ${await res.text()}`)
+		const json = await res.json()
+		return json.embeddings || json.data.map((d: any) => d.embedding)
+	}
+
+	private async callToolByName(name: string, args: any): Promise<{ result: ProcessResult; type: ResponseType }> {
+		switch (name) {
+			case "find_id":
+				return { result: await this.processItemSearch(args.search, args.category), type: ResponseType.Item }
+			case "find_document":
+				return { result: await this.processDocumentSearch(args.question), type: ResponseType.Answer }
+			case "find_command":
+				return {
+					result: await this.processCommandSearch(args.command, args.type),
+					type: ResponseType.CommandHelper
+				}
+			case "personal_information":
+				return { result: await this.processAbout(args.ask), type: ResponseType.Chat }
+			default:
+				throw new Error(`Unknown tool: ${name}`)
 		}
 	}
 
-	/**
-	 * Initialize the OpenAI client and embeddings
-	 */
-	async init(): Promise<void> {
-		var configAi = GetAiServer()
-		if (!configAi) {
-			log.error(`No AI server configuration found`)
-			return
-		}
+	private async processItemSearch(search: string, category: string): Promise<ProcessResult> {
 		try {
-			this.urlAsk = `${configAi.url}/ollama/v1/`
-			this.urlEmbed = `${configAi.url}/ollama/api/embed`
-			this.modelAsk = configAi.model.ask.id
-			this.modelEmbed = configAi.model.embed.id
-			this.key = configAi.key
-			this.type = configAi.type
-			this.temperatureAsk = configAi.model.ask.temperature
-			this.temperatureEmbed = configAi.model.embed.temperature
-			this.maxTokensAsk = configAi.model.ask.max_tokens
-			this.maxTokensEmbed = configAi.model.embed.max_tokens
-			this.maxMatch = config.ai.maxMatch
-			this.maxSearch = config.ai.maxSearch
-			this.maxHistory = config.ai.maxHistory
-
-			this.openaiClient = new OpenAI({
-				apiKey: this.key,
-				baseURL: this.urlAsk
+			const lang = LanguageGame(await detectLang(search))
+			const res = await General.findItem({
+				search,
+				limit: this.cfg.maxSearch,
+				split: true,
+				type: getTypeItem(category),
+				lang
 			})
-
-			log.info(`AI initialized at ${configAi.url} | Key: ${this.key}`)
-			log.info(`Model Ask: ${this.modelAsk} | URL: ${this.urlAsk}`)
-			log.info(`Model Embed: ${this.modelEmbed} | URL: ${this.urlEmbed}`)
-
-			this.initialized = true
-			log.info(`AI system ready`)
-		} catch (error) {
-			log.error(`AI initialization failed: ${error}`)
-			throw new Error(`Failed to initialize AI: ${error}`)
+			if (!res.data?.length) return { data: null, message: `No items for "${search}" in "${category}"` }
+			const msg = res.data.map((i) => `${i.name} (ID: ${i.id})`).join("\n")
+			return { data: res.data, message: `Found ${res.data.length} items:\n${msg}` }
+		} catch (e) {
+			return { data: null, message: `Error: ${e}` }
 		}
 	}
 
-	/**
-	 * Embed a dataset of questions or commands
-	 * @param items - Array of QuestionData or CommandData to embed
-	 */
-	async embedDataset(items: (QuestionData | CommandData)[]): Promise<void> {
-		if (!this.initialized) {
-			await this.init()
-		}
-
+	private async processDocumentSearch(question: string): Promise<ProcessResult> {
 		try {
-			const texts = items
-				.map((item) =>
-					"question" in item
-						? `${item.question} ${item.answer}`
-						: `${item.command} ${item.description} ${item.usage} ${item.type}`
-				)
-				.filter(Boolean)
-
-			log.info(`Embedding ${texts.length} items`)
-
-			const response = await fetch(this.urlEmbed, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					Authorization: `Bearer ${this.key}`
-				},
-				body: JSON.stringify({ model: this.modelEmbed, input: texts })
-			})
-
-			if (!response.ok) {
-				const errorText = await response.text()
-				throw new Error(`Embedding API error ${response.status}: ${errorText}`)
-			}
-
-			const json = await response.json()
-			const embeddings = json.embeddings || json.data?.map((d: any) => d.embedding) || []
-
-			if (embeddings.length !== items.length) {
-				throw new Error(`Expected ${items.length} embeddings, got ${embeddings.length}`)
-			}
-
-			embeddings.forEach((vec: number[], i: number) => {
-				;(items[i] as QuestionData | CommandData).embedding = vec
-			})
-
-			log.info(`✅ Successfully embedded ${items.length} items`)
-		} catch (error) {
-			log.error(`Error embedding dataset: ${error}`)
-			throw error
+			const [embed] = await this.createEmbedding([question])
+			const top = (await General.findTopKSimilar(
+				embed,
+				TypeDocumentation.Question,
+				{},
+				this.cfg.maxMatch
+			)) as QuestionData[]
+			if (!top.length) return { data: null, message: `No info for "${question}"` }
+			const msg = top.map((i) => `Q: ${i.question}\nA: ${i.answer}`).join("\n\n")
+			return { data: top, message: `Found ${top.length} answers:\n${msg}` }
+		} catch (e) {
+			return { data: null, message: `Error: ${e}` }
 		}
 	}
 
-	/**
-	 * Create embeddings for text inputs
-	 * @param texts - Array of texts to embed
-	 * @returns Array of embedding vectors
-	 */
-	async createEmbedding(texts: string[]): Promise<number[][]> {
-		if (!this.initialized) {
-			await this.init()
-		}
-
+	private async processCommandSearch(command: string, type: string): Promise<ProcessResult> {
 		try {
-			log.debug(`Creating embeddings for ${texts.length} texts`)
-
-			const response = await fetch(this.urlEmbed, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					Authorization: `Bearer ${this.key}`
-				},
-				body: JSON.stringify({ model: this.urlEmbed, input: texts })
-			})
-
-			if (!response.ok) {
-				const errorText = await response.text()
-				throw new Error(`Embedding API error ${response.status}: ${errorText}`)
+			const [embed] = await this.createEmbedding([command])
+			const searchParams: Partial<CommandData> = {
+				typeEngine: getTypeGameEngine(type)
 			}
-
-			const json = await response.json()
-
-			if (!Array.isArray(json.embeddings)) {
-				throw new Error(`Unexpected embedding response format`)
-			}
-
-			return json.embeddings
-		} catch (error) {
-			log.error(`Error creating embeddings: ${error}`)
-			throw error
+			const top = (await General.findTopKSimilar(
+				embed,
+				TypeDocumentation.Command,
+				searchParams,
+				this.cfg.maxMatch
+			)) as CommandData[]
+			if (!top.length) return { data: null, message: `No commands for "${command}"` }
+			const formatted = top.map((m) => ({
+				command: m.command,
+				description: m.description,
+				usage: m.usage,
+				type: getStringTypeGameEngine(m.typeEngine)
+			}))
+			const msg = formatted
+				.map((i) => `Cmd: ${i.command}\nDesc: ${i.description}\nUsage: ${i.usage}\nGame: ${i.type}`)
+				.join("\n\n")
+			return { data: formatted, message: `Found ${formatted.length} commands:\n${msg}` }
+		} catch (e) {
+			return { data: null, message: `Error: ${e}` }
 		}
 	}
 
-	async processAbout(ask: string): Promise<ProcessResult> {
-		log.info(`Processing about request: ${ask}`)
-		// TODO: Implement a more sophisticated response based on the ask parameter
+	private async processAbout(ask: string): Promise<ProcessResult> {
 		return {
 			data: {
 				name: `Konno Yuuki`,
@@ -399,386 +367,144 @@ class AI {
 				birthday: `May 23`,
 				origin: `Sword Art Online`,
 				occupation: `Maid`,
-				abilities: `Assisting players, providing information, and solving problems related to the game.`,
-				likes: `Helping players, exploring the world of SAO, and learning new things.`,
-				dislikes: `Seeing players in trouble, and not being able to help them.`,
-				interests: `Learning about the game, assisting players, and exploring new areas.`,
-				quote: `I am here to assist you, my dear player. Please let me know how I can help you today!`,
+				abilities: `Assisting players, providing info.`,
+				likes: `Helping players.`,
+				dislikes: `Seeing players in trouble.`,
+				interests: `Learning game, exploring.`,
+				quote: `I am here to assist you, my dear player!`,
 				avatar: `https://pbs.twimg.com/media/CieFIHIU4AAnR7W.jpg`,
-				info: `Yuuki Konno is a new player who appears in ALfeim Online in volume 7. She leads the Sleeping Knights guild and quickly becomes known as one of the strongest in the game winning 67 straight matches, earning her the title of "Absolute Sword."`
+				info: `Yuuki Konno appears in ALFeim Online, volume 7...`
 			},
-			message: ``
+			message: ""
 		}
 	}
 
-	/**
-	 * Process item search request
-	 * @param search - Search query
-	 * @param category - Item category
-	 * @returns Search results
-	 */
-	async processItemSearch(search: string, category: string): Promise<ProcessResult> {
-		try {
-			const detectedLang = await detectLang(search)
-			const language = LanguageGame(detectedLang)
-
-			const results = await General.findItem({
-				search: search,
-				limit: this.maxSearch,
-				split: true,
-				type: getTypeItem(category),
-				lang: language
-			})
-			log.info(`Item search results: ${JSON.stringify(results)}`)
-
-			if (!results.data || results.data.length === 0) {
-				return {
-					data: null,
-					message: `No items found matching "${search}" in category "${category || "any"}"`
-				}
-			}
-
-			const formattedResults = results.data.map((item) => `${item.name} (ID: ${item.id})`).join("\n")
-
-			return {
-				data: results.data,
-				message: `Found ${results.data.length} items:\n${formattedResults}`
-			}
-		} catch (error) {
-			log.error(`Error processing item search: ${error}`)
-			return {
-				data: null,
-				message: `Error searching for items: ${error}`
-			}
-		}
+	// Overloaded to return correct types for streaming vs non-streaming
+	private sendChat(messages: ChatCompletionMessageParam[], stream: true): Promise<AsyncIterable<ChatCompletionChunk>>
+	private sendChat(messages: ChatCompletionMessageParam[], stream?: false): Promise<ChatCompletion>
+	private async sendChat(
+		messages: ChatCompletionMessageParam[],
+		stream: boolean = false
+	): Promise<ChatCompletion | AsyncIterable<ChatCompletionChunk>> {
+		return this.client.chat.completions.create({
+			model: this.cfg.modelAsk,
+			messages,
+			tools: OPENAI_CONFIG.tools,
+			temperature: this.cfg.tempAsk,
+			max_tokens: this.cfg.maxTokens,
+			stream
+		})
 	}
 
-	/**
-	 * Process document/answer search
-	 * @param question - Question to search for
-	 * @returns Top matching answers
-	 */
-	async processDocumentSearch(question: string): Promise<ProcessResult> {
-		try {
-			log.info(`Processing document search for: ${question}`)
+	async chat(message: string, uid: string, returnJson = false, remember = true): Promise<string | ChatUserDataRsp> {
+		if (!this.initialized) await this.init()
+		const conv = this.getConv(uid, !remember)
+		conv.push({ role: "user", content: message })
 
-			const embeddings = await this.createEmbedding([question])
-			const questionEmbedding = embeddings[0]
+		const initRes = await this.sendChat(conv)
+		const choice = initRes.choices[0]
+		let data: any = null
+		let type = ResponseType.None
 
-			const topMatches = (await General.findTopKSimilar(
-				questionEmbedding,
-				TypeDocumentation.Question,
-				{},
-				this.maxMatch
-			)) as QuestionData[]
-			log.info(`Found matches: ${JSON.stringify(topMatches)}`)
+		if (choice.finish_reason === "tool_calls" && choice.message.tool_calls?.length) {
+			const call = choice.message.tool_calls[0]
+			const args = JSON.parse(call.function?.arguments || "{}")
+			const toolRes = await this.callToolByName(call.function!.name!, args)
+			data = toolRes.result.data
+			type = toolRes.type
+			conv.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(data) })
+			if (choice.message.content) conv.push({ role: "assistant", content: choice.message.content })
 
-			if (!topMatches || topMatches.length === 0) {
-				return {
-					data: null,
-					message: `No relevant information found for "${question}"`
-				}
-			}
-
-			const formattedMatches = topMatches.map((item) => ({
-				question: item.question,
-				answer: item.answer
-			}))
-
-			return {
-				data: formattedMatches,
-				message: `Found ${topMatches.length} relevant answers:\n\n${topMatches
-					.map((item) => `Q: ${item.question}\nA: ${item.answer}`)
-					.join("\n\n")}`
-			}
-		} catch (error) {
-			log.error(`Error processing document search: ${error}`)
-			return {
-				data: null,
-				message: `Error searching documentation: ${error}`
-			}
+			const finalRes = await this.sendChat(conv)
+			const finalMsg = finalRes.choices[0].message.content || ""
+			conv.push({ role: "assistant", content: finalMsg })
+			const { response, think } = this.extractThinking(finalMsg)
+			return returnJson
+				? { uid, ask: message, message: response, think, type, data, totalChat: conv.length }
+				: response
 		}
+
+		const text = choice.message.content || ""
+		conv.push({ role: "assistant", content: text })
+		const { response, think } = this.extractThinking(text)
+		return returnJson
+			? { uid, ask: message, message: response, think, type, data: null, totalChat: conv.length }
+			: response
 	}
 
-	/**
-	 * Process command search
-	 * @param command - Command to search for
-	 * @param type - Game type
-	 * @returns Matching commands
-	 */
-	async processCommandSearch(command: string, type: string): Promise<ProcessResult> {
-		try {
-			log.info(`Processing command search: "${command}" for game type "${type}"`)
-
-			const embeddings = await this.createEmbedding([command])
-			log.info(`Command embeddings: ${JSON.stringify(embeddings)}`)
-
-			const commandEmbedding = embeddings[0]
-
-			const searchParams: Partial<CommandData> = {
-				typeEngine: getTypeGameEngine(type)
-			}
-
-			const topMatches = (await General.findTopKSimilar(
-				commandEmbedding,
-				TypeDocumentation.Command,
-				searchParams,
-				this.maxMatch
-			)) as CommandData[]
-			log.info(`Found command matches: ${JSON.stringify(topMatches)}`)
-
-			if (!topMatches || topMatches.length === 0) {
-				return {
-					data: null,
-					message: `No commands found matching "${command}" for game type "${type || "any"}"`
-				}
-			}
-
-			// Format data for easier consumption by the AI
-			const sanitizedMatches = topMatches.map((match) => ({
-				command: match.command,
-				description: match.description,
-				usage: match.usage,
-				type: getStringTypeGameEngine(match.typeEngine)
-			}))
-
-			return {
-				data: sanitizedMatches,
-				message: `Found ${topMatches.length} commands:\n\n${sanitizedMatches
-					.map(
-						(item) =>
-							`Command: ${item.command}\nDescription: ${item.description}\nUsage: ${item.usage}\nGame: ${item.type}`
-					)
-					.join("\n\n")}`
-			}
-		} catch (error) {
-			log.error(`Error processing command search: ${error}`)
-			return {
-				data: null,
-				message: `Error searching for commands: ${error}`
-			}
-		}
-	}
-
-	/**
-	 * Manage conversation history
-	 * @param uid - User ID
-	 * @param reset - Whether to reset the conversation
-	 * @returns Current conversation messages
-	 */
-	private getConversation(uid: string, reset: boolean = false): ChatCompletionMessageParam[] {
-		if (reset || !this.conversations.has(uid)) {
-			const newConversation: ChatCompletionMessageParam[] = [
-				{ role: "system", content: OPENAI_CONFIG.systemPrompt }
-			]
-			this.conversations.set(uid, newConversation)
-			log.info(`${uid}: ${reset ? "Reset" : "Started new"} conversation`)
-			return newConversation
-		}
-
-		const conversation = this.conversations.get(uid)!
-
-		// Trim conversation if it gets too long
-		if (conversation.length > this.maxHistory * 2) {
-			// Keep system prompt and trim oldest messages
-			const trimmed = [conversation[0], ...conversation.slice(-(this.maxHistory * 2 - 1))]
-			this.conversations.set(uid, trimmed)
-			log.info(`${uid}: Trimmed conversation history from ${conversation.length} to ${trimmed.length} messages`)
-			return trimmed
-		}
-
-		return conversation
-	}
-
-	/**
-	 * Process AI chat
-	 * @param message - User message
-	 * @param uid - User ID
-	 * @param returnJson - Whether to return JSON response
-	 * @param remember - Whether to remember conversation history
-	 * @returns Chat response
-	 */
-	async chat(
+	async chatStream(
 		message: string,
 		uid: string,
-		returnJson: boolean = false,
-		remember: boolean = true
-	): Promise<string | ChatUserDataRsp> {
-		if (!this.initialized) {
-			await this.init()
-		}
+		returnJson = false,
+		remember = true,
+		onMessage: (msg: string | ChatUserDataRsp) => void = () => {}
+	) {
+		if (!this.initialized) await this.init()
+		const conv = this.getConv(uid, !remember)
+		conv.push({ role: "user", content: message })
 
-		try {
-			// Get or create conversation
-			const conversation = this.getConversation(uid, !remember)
+		// Initial streaming request
+		const initStream = await this.sendChat(conv, true)
+		let initContent = ""
+		let initTool: any = null
+		let toolType = ResponseType.None
 
-			// Add user message
-			conversation.push({ role: "user", content: message })
-			log.info(`${uid} > User: ${message}`)
+		for await (const chunk of initStream) {
+			const delta = chunk.choices[0]?.delta
+			if (delta?.content) initContent += delta.content
+			if (delta?.tool_calls?.length && !initTool) initTool = delta.tool_calls[0]
 
-			// Send initial request to get tool calls
-			const initialResponse = await this.openaiClient.chat.completions.create({
-				model: this.modelAsk,
-				messages: conversation,
-				tools: OPENAI_CONFIG.tools,
-				temperature: this.temperatureAsk,
-				max_tokens: this.maxTokensAsk
-			})
-
-			const initialChoice = initialResponse.choices[0]
-			const initialMessage = initialChoice.message
-
-			log.info(
-				`${uid} > Initial AI response: ${initialMessage.content || "[No content]"} (Finish reason: ${
-					initialChoice.finish_reason
-				})`
+			const { response, think } = this.extractThinking(initContent)
+			let output: any = response
+			if (!response.trim() && initTool) {
+				output = `Tool call: ${initTool.function.name}(${initTool.function.arguments})`
+			}
+			if(isEmpty(output)) continue
+			onMessage(
+				returnJson
+					? { uid, ask: message, message: output, think, type: toolType, data: null, totalChat: conv.length }
+					: output
 			)
-
-			let processResult: ProcessResult = {
-				message: "No tool calls were made",
-				data: null
-			}
-
-			let responseType = ResponseType.None
-
-			// Handle tool calls if present
-			if (initialChoice.finish_reason === "tool_calls" && initialMessage.tool_calls?.length) {
-				const toolCall = initialMessage.tool_calls[0]
-				const { name, arguments: argsStr } = toolCall.function!
-				const args = JSON.parse(argsStr || "{}")
-
-				log.info(`${uid} > Tool call: ${name}(${argsStr})`)
-
-				// Process different tool types
-				switch (name) {
-					case "find_id":
-						processResult = await this.processItemSearch(args.search, args.category)
-						responseType = ResponseType.Item
-						break
-					case "find_document":
-						processResult = await this.processDocumentSearch(args.question)
-						responseType = ResponseType.Answer
-						break
-					case "find_command":
-						processResult = await this.processCommandSearch(args.command, args.type)
-						responseType = ResponseType.CommandHelper
-						break
-					case "personal_information":
-						processResult = await this.processAbout(args.ask)
-						responseType = ResponseType.Chat
-						break
-					default:
-						log.warn(`${uid} > Unknown tool called: ${name}`)
-				}
-
-				// Add tool response to conversation
-				conversation.push({
-					role: "tool",
-					tool_call_id: toolCall.id,
-					content: JSON.stringify(processResult.data)
-				})
-
-				// Add assistant response to conversation
-				if (initialMessage.content) {
-					conversation.push({
-						role: "assistant",
-						content: initialMessage.content
-					})
-				}
-			} else if (initialMessage.content) {
-				// Add assistant response if no tool calls
-				conversation.push({
-					role: "assistant",
-					content: initialMessage.content
-				})
-			}
-
-			// Get final response if needed
-			let finalChoice = initialChoice
-			let finalMessage = initialMessage
-
-			if (initialChoice.finish_reason !== "stop") {
-				log.info(`${uid} > Getting final response...`)
-
-				const finalResponse = await this.openaiClient.chat.completions.create({
-					model: this.modelAsk,
-					messages: conversation,
-					temperature: this.temperatureAsk,
-					max_tokens: this.maxTokensAsk,
-				})
-
-				finalChoice = finalResponse.choices[0]
-				finalMessage = finalChoice.message
-
-				log.info(
-					`${uid} > Final AI response: ${finalMessage.content || "[No content]"} (Finish reason: ${
-						finalChoice.finish_reason
-					})`
-				)
-
-				// Add final response to conversation if different
-				if (finalMessage.content && finalMessage.content !== initialMessage.content) {
-					conversation.push({
-						role: "assistant",
-						content: finalMessage.content
-					})
-				}
-			}
-
-			// Clean up if finished
-			if (finalChoice.finish_reason === "stop") {
-				// Keep conversation in memory unless explicitly requested
-				if (!remember) {
-					this.conversations.delete(uid)
-					log.info(`${uid} > Conversation ended and deleted`)
-				}
-			}
-
-			// Process final response
-			const finalContent = finalMessage.content || processResult.message
-			const { response, think } = extractThinkingContent(finalContent)
-
-			log.info(`${uid} > Response processed: ${response.substring(0, 100)}${response.length > 100 ? "..." : ""}`)
-			if (think) {
-				log.info(`${uid} > Thinking: ${think.substring(0, 100)}${think.length > 100 ? "..." : ""}`)
-			}
-
-			// Return response
-			if (returnJson) {
-				return {
-					uid,
-					ask: message,
-					message: response,
-					think: think,
-					type: responseType,
-					data: processResult.data,
-					totalChat: conversation.length
-				}
-			} else {
-				return response
-			}
-		} catch (error) {
-			log.error(`Error in chat: ${error}`)
-
-			const errorMessage = `Sorry, I encountered an error while processing your request: ${error}`
-
-			if (returnJson) {
-				return {
-					uid,
-					ask: message,
-					message: errorMessage,
-					think: `Error: ${error}`,
-					type: ResponseType.None,
-					data: null,
-					totalChat: this.conversations.has(uid) ? this.conversations.get(uid)!.length : 0
-				}
-			} else {
-				return errorMessage
-			}
 		}
+
+		// Handle tool call if present
+		if (initTool) {
+			const args = JSON.parse(initTool.function.arguments || "{}")
+			const toolRes = await this.callToolByName(initTool.function.name, args)
+			log.info(`Tool call: `,toolRes)
+			conv.push({ role: "tool", tool_call_id: initTool.id, content: JSON.stringify(toolRes.result.data) })
+			toolType = toolRes.type
+			if (initContent.trim()) conv.push({ role: "assistant", content: initContent })
+
+			// Final streaming response after tool
+			const finalStream = await this.sendChat(conv, true)
+			let finalContent = ""
+			for await (const chunk of finalStream) {
+				log.info(`Final stream chunk: `,JSON.stringify(chunk))
+				const delta = chunk.choices[0]?.delta
+				if (delta?.content) finalContent += delta.content
+				const { response, think } = this.extractThinking(finalContent)
+				if (isEmpty(response)) continue
+				onMessage(
+					returnJson
+						? {
+								uid,
+								ask: message,
+								message: response,
+								think,
+								type: toolType,
+								data: toolRes.result.data,
+								totalChat: conv.length
+						  }
+						: response
+				)
+			}
+		}else{
+			log.info(`No tool call found`)
+		}
+
+		if (!remember) this.convs.delete(uid)
 	}
 }
 
-// Create singleton instance
-const aiInstance = new AI()
-export default aiInstance
+export default new AI()
