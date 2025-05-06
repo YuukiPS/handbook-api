@@ -1,6 +1,6 @@
 import express, { Request, Response } from "express"
 import General from "@DB/book/general"
-import AI from "@DB/book/ai"
+import AI from "@SV/ai"
 import SRTool from "@DB/book/star-rail"
 import Logger from "@UT/logger"
 const r = express.Router()

@@ -1,7 +1,6 @@
 import Logger from "@UT/logger"
 import { Command } from "./Interface"
-import AI from "@DB/book/ai"
-import General from "@DB/book/general"
+import AI from "@SV/ai"
 import fs from "fs"
 import { CommandData, getTypeGameEngine, QuestionData, TypeDocumentation } from "@UT/response"
 import { getTimeV2 } from "@UT/library"
@@ -96,14 +95,11 @@ export default async function handle(command: Command) {
 			language: "EN",
 			embedding: []
 		}
+		cmd.embedding = await AI.createEmbedding([`${cmd.command} ${cmd.description} ${cmd.usage} ${cmd.type}`])
 		toadd.push(cmd)
 	}
-	await AI.embedDataset(toadd)
-	log.info(`Add ${toadd.length} command to database`)
-	for (const doc of toadd) {
-		var isAdd = await General.addDoc(doc)
-		log.info(`Add ${doc.command} to database? `, isAdd)
-	}
+
+	log.info(`Done ${toadd.length} command to database`)
 
 	const questionAnswerPairs = parseMarkdown(`${FOLDER}/dataset.md`, "Knowledge", "Q:", [
 		"question",
@@ -128,12 +124,9 @@ export default async function handle(command: Command) {
 			language: "EN",
 			embedding: []
 		}
+		ask.embedding = await AI.createEmbedding([`${ask.question} ${ask.answer}`])
 		toadd2.push(ask)
 	}
-	await AI.embedDataset(toadd2)
-	log.info(`Add ${toadd.length} question to database`)
-	for (const doc of toadd2) {
-		var isAdd = await General.addDoc(doc)
-		log.info(`Add ${doc.question} to database? `, isAdd)
-	}
+
+	log.info(`done ${toadd.length} question to database`)
 }

@@ -9,25 +9,15 @@ import {
 	isValidUrl,
 	readJsonFileCached
 } from "@UT/library"
-import {
-	BookRsp,
-	DocumentationData,
-	GitLabCommit,
-	ItemData,
-	Prop,
-	PropRsp,
-	QuestionData,
-	TypeDocumentation
-} from "@UT/response"
-// thrid party
+import { BookRsp, DocumentationData, GitLabCommit, ItemData, Prop, PropRsp, TypeDocumentation } from "@UT/response"
 import axios from "axios"
 import fs from "fs/promises"
-// datebase
 import DBMongo from "@DB/client/mongo"
 import { Filter, OptionalUnlessRequiredId } from "mongodb"
 import config from "@UT/config"
 import { LANG_SR } from "./star-rail"
 import { LANG_GI } from "./genshin-impact"
+import Discord from "@SV/discord"
 
 const log = new Logger("General")
 
@@ -78,7 +68,7 @@ export const _ = {
 			if (!isEmpty(type)) query.type = type
 			if (!isEmpty(game)) query.game = game
 
-			log.info(`query: ${limit} limit > `, query)
+			log.debug(`query findItem: ${limit} limit > `, query)
 
 			// compute skip
 			const skip = (page - 1) * limit
@@ -564,8 +554,8 @@ export const _ = {
 		if (!sourceUrlorLocal) return ""
 
 		if (await fileExists(localFile)) {
-			log.info(`File ${localFile} already exists`)
-			// TODO: check if real valid file
+			log.debug(`File1 ${localFile} already exists`)
+			// TODO: check if real valid file use md5 between local and remote
 			return urlPublic
 		}
 
@@ -615,7 +605,8 @@ export const _ = {
 				.then(() => true)
 				.catch(() => false)
 			if (fileExists) {
-				log.info(`File ${savePath} already exists`)
+				log.debug(`File2 ${savePath} already exists`)
+				// TODO: check if real valid file use md5 between local and remote
 				return savePath
 			} else {
 				log.info(`File ${savePath} does not exist but skip is true so we will download it`)
@@ -631,7 +622,12 @@ export const _ = {
 		}
 		return savePath
 	},
-	checkGit: async function (name: string, saveDB: string, skip: boolean = false): Promise<boolean> {
+	checkGit: async function (
+		name: string,
+		saveDB: string,
+		skip: boolean = false,
+		tesMode: boolean = false
+	): Promise<boolean> {
 		if (skip) {
 			log.info(`Skip checking Git: ${name} > ${saveDB}`)
 			return false
@@ -642,12 +638,72 @@ export const _ = {
 			const latestCommit = response.data[0]
 
 			log.info(`Latest commit for ${saveDB} > ${latestCommit.id} (${latestCommit.committed_date})`)
+
 			var getLast = await this.getProp(saveDB)
 			if (getLast.data != null) {
-				if (latestCommit.id !== getLast.data.value) {
+				if (latestCommit.id !== getLast.data.value || tesMode) {
 					log.info("New update is available!")
-					if (!isEmpty(config.notification.token)) {
-						this.postDiscord(config.notification, `new update res ${name} > ${latestCommit.id}`)
+					if (!isEmpty(config.bot.discord.webhook.notification.token)) {
+						const embedPayload = {
+							type: "rich",
+							title: latestCommit.title,
+							description: "", // you can add a subtitle or leave empty
+							color: 0x7289da, // Discord “blurple” or any hex color
+							fields: [
+								{ name: "Commit ID", value: latestCommit.id, inline: false },
+								{ name: "Short ID", value: latestCommit.short_id, inline: true },
+								{
+									name: "Created At",
+									value: new Date(latestCommit.created_at).toLocaleString(),
+									inline: true
+								},
+								{
+									name: "Parent Commit(s)",
+									value: latestCommit.parent_ids.join(", ") || "None",
+									inline: false
+								},
+								{
+									name: "Author",
+									value: `${latestCommit.author_name}`,
+									inline: true
+								},
+								{
+									name: "Authored Date",
+									value: new Date(latestCommit.authored_date).toLocaleString(),
+									inline: true
+								},
+								{
+									name: "Committer",
+									value: `${latestCommit.committer_name}`,
+									inline: true
+								},
+								{
+									name: "Committed Date",
+									value: new Date(latestCommit.committed_date).toLocaleString(),
+									inline: true
+								},
+								{
+									name: "Message",
+									value: latestCommit.message.trim() || "*no message*",
+									inline: false
+								},
+								{
+									name: "View Commit",
+									value: `[Open in GitLab](${latestCommit.web_url})`,
+									inline: false
+								}
+							],
+							footer: {
+								text: "GitLab Commit Notification"
+							}
+						}
+						Discord.SendWebhook(
+							{
+								content: `Update resource!`,
+								embeds: [embedPayload]
+							} as any,
+							config.bot.discord.webhook.notification
+						)
 					} else {
 						log.warn(`skip notif update, no token is found`)
 					}
@@ -771,48 +827,6 @@ export const _ = {
 				retcode: -2,
 				data: null
 			}
-		}
-	},
-	async postDiscord(
-		connect: {
-			id_channel: string
-			token: string
-		},
-		content: string | null = null,
-		embed: {
-			url?: string
-			title?: string
-			description?: string
-			color?: number // Optional color in decimal format
-			image?: { url: string } // Optional image URL
-			thumbnail?: { url: string } // Optional thumbnail URL
-			fields?: { name: string; value: string; inline?: boolean }[] // Optional fields
-			footer?: { text: string; icon_url?: string } // Optional footer
-		} | null = null
-	): Promise<void> {
-		try {
-			const data: any = {}
-			if (content) data.content = content
-			if (embed) data.embeds = [embed]
-
-			const response = await axios.post(
-				`https://canary.discord.com/api/webhooks/${connect.id_channel}/${connect.token}`,
-				data,
-				{
-					headers: {
-						"Content-Type": "application/json"
-					},
-					timeout: 5000
-				}
-			)
-
-			if (response.status === 204) {
-				log.info("Message sent to Discord successfully.")
-			} else {
-				log.errorNoStack("Unexpected response:", response.data)
-			}
-		} catch (error) {
-			log.error("Error sending message to Discord:", error)
 		}
 	}
 }

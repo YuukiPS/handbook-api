@@ -4,11 +4,19 @@ import { isEmpty } from "./library"
 export interface GitLabCommit {
 	id: string
 	short_id: string
+	created_at: string
+	parent_ids: string[]
 	title: string
-	author_name: string
-	authored_date: string
-	committed_date: string
 	message: string
+	author_name: string
+	author_email: string
+	authored_date: string
+	committer_name: string
+	committer_email: string
+	committed_date: string
+	trailers: Record<string, string>
+	extended_trailers: Record<string, string>
+	web_url: string
 }
 
 // Prop

@@ -2,15 +2,14 @@ import "module-alias/register"
 import "@UT/catch"
 import Logger from "@UT/logger"
 import { getLocalIpAddress, sleep } from "@UT/library"
-import { domain } from "@UT/share"
-import { GetProfile } from "@UT/config"
+import { domainPublic, GetProfile } from "@UT/config"
 // main
 import Interface from "@CMD/server/Interface"
 
 const log = new Logger("Main")
 
 const profile = GetProfile()
-log.info(`Hi ${profile.title} | Domain: ${domain} | ${profile.name} | LOCAL IP: ${getLocalIpAddress()}`)
+log.info(`Hi ${profile.title} | Domain: ${domainPublic} | ${profile.name} | LOCAL IP: ${getLocalIpAddress()}`)
 
 // Function to run a service with error handling and restart logic
 // bug https://github.com/wclr/ts-node-dev/issues/209
@@ -21,9 +20,8 @@ async function runServiceWithRetry(importPath: string, runFuncName: string) {
 			const module = await import(importPath)
 			const runFunc = module.default?.[runFuncName]
 			if (typeof runFunc === "function") {
-				// ← this await is crucial
 				await runFunc()
-				log.info(`${importPath} exited cleanly.`)
+				//log.info(`${importPath} exited cleanly.`)
 				break
 			}
 			throw new Error(`${runFuncName} is not a function in ${importPath}`)
@@ -35,8 +33,10 @@ async function runServiceWithRetry(importPath: string, runFuncName: string) {
 }
 
 async function initializeServices() {
-	await runServiceWithRetry("@SV/web", "Run")
+	await runServiceWithRetry("@SV/web/http", "Run")
 	await runServiceWithRetry("@JO/update", "Run")
+	await runServiceWithRetry("@JO/aiQueue", "Run")
+	await runServiceWithRetry("@SV/discord", "Run")
 }
 
 initializeServices()

@@ -33,16 +33,20 @@
 		"acfg": "^1.2.4",
 		"axios": "^1.7.2",
 		"body-parser": "^1.20.2",
+		"bullmq": "^5.52.1",
 		"cld3-asm": "^4.0.0",
 		"cookie-parser": "^1.4.6",
 		"cors": "^2.8.5",
+		"discord.js": "^14.19.3",
 		"express": "^4.21.0",
 		"ioredis": "^5.4.1",
 		"minimist": "^1.2.8",
 		"module-alias": "^2.2.3",
 		"mongodb": "^6.15.0",
 		"openai": "^4.96.2",
-		"set-interval-async": "^3.0.3"
+		"rate-limiter-flexible": "^7.1.0",
+		"set-interval-async": "^3.0.3",
+		"socket.io": "^4.8.1"
 	},
 	"devDependencies": {
 		"@types/body-parser": "^1.19.5",

@@ -27,13 +27,13 @@ import {
 	ItemScene,
 	ItemWeapon
 } from "@UT/response"
-import { createEnum, isEmpty } from "@UT/library"
-import { domainPublic } from "@UT/share"
+import { isEmpty } from "@UT/library"
 import ExcelManager from "@UT/excel"
 // thrid party
 import { isMainThread } from "worker_threads"
 // datebase
 import General from "@DB/book/general"
+import { domainPublic } from "@UT/config"
 
 const nameGame = "genshin-impact"
 const typeGame = 1
@@ -321,12 +321,12 @@ class GI {
 			log.info(`No update available: ${REPO_GI} > skip? ${skip_update}`)
 		}
 
-		log.info(`Downloading localization files`)
+		log.debug(`Downloading localization files`)
 		for (const lang of LANG_GI) {
 			await General.downloadGit(REPO_GI, FOLDER_GI, `TextMap/TextMap${lang}.json`, skip_dl, REPO_BRANCH_GI)
 		}
 
-		log.info(`Downloading Excel files`)
+		log.debug(`Downloading Excel files`)
 		this.excel = new ExcelManager(REPO_GI, FOLDER_GI, EXCEL_GI, skip_dl, REPO_BRANCH_GI, PATHBIN_GI)
 		await this.excel.loadFiles()
 

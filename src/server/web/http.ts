@@ -4,12 +4,9 @@ import cors from "cors"
 import Logger from "@UT/logger"
 import { createServer, IncomingMessage, Server, ServerResponse } from "node:http"
 import { GetProfile } from "@UT/config"
-
-// API
 import { isMainThread } from "worker_threads"
-
-// Router
 import WebRouter from "@SV/web/router"
+import IO from "./socket"
 
 const log = new Logger("Web")
 const w = express()
@@ -99,11 +96,16 @@ class WebServer {
 		this.server = createServer(w)
 		this.server.listen(me.port, function () {
 			log.info(`Server started on port ${me.port}`)
+			IO.Start(me.server)
 		})
 	}
 
 	public Run() {
-		log.info(`Pong`)
+		log.info(`Pong Http`)
+	}
+
+	public IO() {
+		return IO.Instance()
 	}
 }
 

@@ -167,7 +167,7 @@ export class RedisDB {
 	}
 
 	public Run() {
-		log.info(`Pong`)
+		log.info(`Pong Redis`)
 	}
 }
 

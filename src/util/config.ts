@@ -13,18 +13,70 @@ export const _ = acfg({
 			url: "redis://:password@127.0.0.1:1234/0"
 		}
 	},
-	ai:{
-		key: "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-		modelAsk: "qwen3:0.6b", // need tool so use https://ollama.com/search?c=tools&o=newest
-		modelEmbed: "nomic-embed-text", // need embed so use https://ollama.com/search?c=embedding&o=newest
-		baseURL: "https://xxx",
-		baseBackupUrl: "https://xxx", // if home server down, use cloud server
-		ask: "/ollama/v1/",
-		embed: "/ollama/api/embed",
+	ratelimit: {
+		ai: {
+			// base ip or global
+			guest: {
+				request: 1,
+				time: 15 // 15 sec
+			},
+			// base user
+			user: {
+				request: 1,
+				time: 3 // 3 sec
+			}
+		}
 	},
-	notification: {
-		id_channel: "",
-		token: ""
+	auth: {
+		api: "https://ps.yuuki.me", // url for auth
+		uid: "110000000", // uid for auth
+		code: "0000", // code for auth, TODO: maybe we use token instead
+		useApi: true // if false use db localhost ignore auth
+	},
+	ai: {
+		server: {
+			name: "ollama cloud",
+			default: true, // if false use backup server
+			type: 1, // 1=Ollama, 2.LM Studio
+			url: "https://xxx",
+			key: "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+			model: {
+				ask: {
+					id: "qwen3:0.6b", // better stream use qwen3:1.7b+
+					temperature: 0.7,
+					max_tokens: 800
+				},
+				embed: {
+					id: "nomic-embed-text",
+					temperature: 0.7,
+					max_tokens: 800
+				}
+			}
+		},
+		maxQueus: 4, // users simultaneously use ai
+		maxHistory: 10, // max history for each user
+		maxSearch: 5, // max search item found it
+		maxMatch: 2 // max embeddings search
+	},
+	bot: {
+		discord: {
+			token: "",
+			client_id: "",
+			client_secret: "",
+			guild_id: "",
+			permission: {
+				admin: "",
+				mod: [""],
+				guest: [""],
+				member: [""]
+			},
+			webhook: {
+				notification: {
+					id: "",
+					token: ""
+				}
+			}
+		}
 	},
 	profile: [
 		{
@@ -38,7 +90,11 @@ export const _ = acfg({
 				public: 443,
 				private: 10040
 			},
-			autoTesting: false
+			autoTesting: false, // TODO: maybe just move to (run)
+			run: {
+				discord: true,
+				ai: true
+			}
 		},
 		{
 			name: "dev",
@@ -51,12 +107,17 @@ export const _ = acfg({
 				public: 50040,
 				private: 50040
 			},
-			autoTesting: true
+			autoTesting: true,
+			run: {
+				discord: true,
+				ai: true
+			}
 		}
 	]
 })
 
 const argv = require("minimist")(process.argv.slice(2))
+
 /**
  * Get Profile Web
  */
@@ -70,6 +131,49 @@ export function GetProfile(name: string = "") {
 		process.exit(1)
 	}
 	return config_tmp
+}
+
+/**
+ * Get URL Domain Public
+ * @returns {URL}
+ */
+export function GetDomain(): URL {
+	return new URL(GetProfile().url.public)
+}
+export const domainPublic = GetProfile("prod").url.public
+
+/**
+ * AI‐server configuration shape
+ */
+interface AiServerConfig {
+	name: string
+	default: boolean
+	type: number
+	url: string
+	key: string
+	model: {
+		ask: {
+			id: string
+			temperature: number
+			max_tokens: number
+		}
+		embed: {
+			id: string
+			temperature: number
+			max_tokens: number
+		}
+	}
+}
+
+/**
+ * Get the AI server marked as default.
+ * @returns The AiServerConfig with default=true, or undefined if none.
+ */
+export function GetAiServer(): AiServerConfig | undefined {
+	// normalize to an array in case you ever switch to multiple servers
+	const servers = Array.isArray(_.ai.server) ? _.ai.server : [_.ai.server]
+
+	return servers.find((s) => s.default)
 }
 
 export default _

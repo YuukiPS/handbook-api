@@ -21,7 +21,7 @@ class Update {
 	}
 
 	public Run() {
-		log.info(`Pong`)
+		log.info(`Pong Update`)
 	}
 
 	public Start() {

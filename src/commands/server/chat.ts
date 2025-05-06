@@ -1,6 +1,6 @@
 import Logger from "@UT/logger"
 import { Command } from "./Interface"
-import AI from "@DB/book/ai"
+import AI from "@SV/ai"
 const log = new Logger("/chat", "blue")
 
 export default async function handle(command: Command) {

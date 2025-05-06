@@ -27,8 +27,7 @@ import {
 	ItemStage,
 	ItemWeapon
 } from "@UT/response"
-import { createEnum, isEmpty, sleep } from "@UT/library"
-import { domainPublic } from "@UT/share"
+import { isEmpty, sleep } from "@UT/library"
 import ExcelManager from "@UT/excel"
 // thrid party
 import { isMainThread } from "worker_threads"
@@ -37,6 +36,7 @@ import { Document, Sort } from "mongodb"
 // datebase
 import DBMongo from "@DB/client/mongo"
 import General from "@DB/book/general"
+import { domainPublic } from "@UT/config"
 
 const nameGame = "star-rail"
 const typeGame = 2
@@ -172,12 +172,12 @@ class SR {
 			log.info(`No update available: ${REPO_SR} > skip? ${skip_update}`)
 		}
 
-		log.info(`Downloading localization files`)
+		log.debug(`Downloading localization files`)
 		for (const lang of LANG_SR) {
 			await General.downloadGit(REPO_SR, FOLDER_SR, `TextMap/TextMap${lang}.json`, skip_dl, REPO_BRANCH_SR)
 		}
 
-		log.info(`Downloading Excel files`)
+		log.debug(`Downloading Excel files`)
 		this.excel = new ExcelManager(REPO_SR, FOLDER_SR, EXCEL_SR, skip_dl, REPO_BRANCH_SR, PATHBIN_SR)
 		await this.excel.loadFiles()
 

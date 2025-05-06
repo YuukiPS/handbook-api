@@ -17,6 +17,8 @@ import OpenAI from "openai"
 import {
 	ChatCompletion,
 	ChatCompletionChunk,
+	ChatCompletionCreateParamsNonStreaming,
+	ChatCompletionCreateParamsStreaming,
 	ChatCompletionMessageParam,
 	ChatCompletionTool
 } from "openai/resources/chat/completions"
@@ -204,6 +206,8 @@ class AI {
 	private client!: OpenAI
 	private convs = new Map<string, ChatCompletionMessageParam[]>()
 	private initialized = false
+	private readonly MAX_TOOL_TRIES_STREAM = 15
+	private readonly MAX_TOOL_TRIES_NOSTREAM = 3
 	private cfg = {
 		urlAsk: "",
 		urlEmbed: "",
@@ -267,7 +271,7 @@ class AI {
 		return { response: resp || "", think: parts.join("\n") || "" }
 	}
 
-	private async createEmbedding(texts: string[]) {
+	public async createEmbedding(texts: string[]) {
 		const res = await fetch(this.cfg.urlEmbed, {
 			method: "POST",
 			headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.cfg.key}` },
@@ -379,21 +383,33 @@ class AI {
 		}
 	}
 
-	// Overloaded to return correct types for streaming vs non-streaming
-	private sendChat(messages: ChatCompletionMessageParam[], stream: true): Promise<AsyncIterable<ChatCompletionChunk>>
-	private sendChat(messages: ChatCompletionMessageParam[], stream?: false): Promise<ChatCompletion>
+	// Overloads for correct TS return types:
+	private sendChat(
+		messages: ChatCompletionMessageParam[],
+		options: { stream: true; useTools?: boolean }
+	): Promise<AsyncIterable<ChatCompletionChunk>>
+	private sendChat(
+		messages: ChatCompletionMessageParam[],
+		options?: { stream?: false; useTools?: boolean }
+	): Promise<ChatCompletion>
+
+	// Unified implementation:
 	private async sendChat(
 		messages: ChatCompletionMessageParam[],
-		stream: boolean = false
+		{ stream = false, useTools = true }: { stream?: boolean; useTools?: boolean } = {}
 	): Promise<ChatCompletion | AsyncIterable<ChatCompletionChunk>> {
-		return this.client.chat.completions.create({
+		// Build params conditionally
+		const params: ChatCompletionCreateParamsStreaming | ChatCompletionCreateParamsNonStreaming = {
 			model: this.cfg.modelAsk,
 			messages,
-			tools: OPENAI_CONFIG.tools,
 			temperature: this.cfg.tempAsk,
 			max_tokens: this.cfg.maxTokens,
 			stream
-		})
+		}
+		if (useTools) {
+			params.tools = OPENAI_CONFIG.tools
+		}
+		return this.client.chat.completions.create(params)
 	}
 
 	async chat(message: string, uid: string, returnJson = false, remember = true): Promise<string | ChatUserDataRsp> {
@@ -401,34 +417,51 @@ class AI {
 		const conv = this.getConv(uid, !remember)
 		conv.push({ role: "user", content: message })
 
-		const initRes = await this.sendChat(conv)
-		const choice = initRes.choices[0]
+		let attempt = 0
 		let data: any = null
 		let type = ResponseType.None
+		let lastChoice: { finish_reason: string; message: any } | null = null
 
-		if (choice.finish_reason === "tool_calls" && choice.message.tool_calls?.length) {
-			const call = choice.message.tool_calls[0]
-			const args = JSON.parse(call.function?.arguments || "{}")
-			const toolRes = await this.callToolByName(call.function!.name!, args)
-			data = toolRes.result.data
-			type = toolRes.type
-			conv.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(data) })
-			if (choice.message.content) conv.push({ role: "assistant", content: choice.message.content })
-
-			const finalRes = await this.sendChat(conv)
-			const finalMsg = finalRes.choices[0].message.content || ""
-			conv.push({ role: "assistant", content: finalMsg })
-			const { response, think } = this.extractThinking(finalMsg)
-			return returnJson
-				? { uid, ask: message, message: response, think, type, data, totalChat: conv.length }
-				: response
+		while (attempt < this.MAX_TOOL_TRIES_NOSTREAM) {
+			attempt++
+			const res = await this.sendChat(conv)
+			const choice = res.choices[0]
+			if (choice.finish_reason === "tool_calls" && choice.message.tool_calls?.length) {
+				const call = choice.message.tool_calls[0]
+				const args = JSON.parse(call.function?.arguments || "{}")
+				const toolRes = await this.callToolByName(call.function!.name!, args)
+				data = toolRes.result.data
+				type = toolRes.type
+				conv.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(data) })
+				if (choice.message.content) conv.push({ role: "assistant", content: choice.message.content })
+				continue
+			} else {
+				lastChoice = choice as any
+				break
+			}
 		}
 
-		const text = choice.message.content || ""
+		if (!lastChoice) {
+			const msg = "Sorry, I'm unable to fetch the information right now."
+			conv.push({ role: "assistant", content: msg })
+			return returnJson
+				? {
+						uid,
+						ask: message,
+						message: msg,
+						think: "",
+						type: ResponseType.None,
+						data: null,
+						totalChat: conv.length
+				  }
+				: msg
+		}
+
+		const text = lastChoice.message.content || lastChoice.message || ""
 		conv.push({ role: "assistant", content: text })
 		const { response, think } = this.extractThinking(text)
 		return returnJson
-			? { uid, ask: message, message: response, think, type, data: null, totalChat: conv.length }
+			? { uid, ask: message, message: response, think, type, data, totalChat: conv.length }
 			: response
 	}
 
@@ -443,64 +476,116 @@ class AI {
 		const conv = this.getConv(uid, !remember)
 		conv.push({ role: "user", content: message })
 
-		// Initial streaming request
-		const initStream = await this.sendChat(conv, true)
-		let initContent = ""
-		let initTool: any = null
+		let attempt = 0
+		let toolData: any = null
 		let toolType = ResponseType.None
+		var tool = true
 
-		for await (const chunk of initStream) {
-			const delta = chunk.choices[0]?.delta
-			if (delta?.content) initContent += delta.content
-			if (delta?.tool_calls?.length && !initTool) initTool = delta.tool_calls[0]
+		while (attempt < this.MAX_TOOL_TRIES_STREAM) {
+			attempt++
 
-			const { response, think } = this.extractThinking(initContent)
-			let output: any = response
-			if (!response.trim() && initTool) {
-				output = `Tool call: ${initTool.function.name}(${initTool.function.arguments})`
-			}
-			if(isEmpty(output)) continue
-			onMessage(
-				returnJson
-					? { uid, ask: message, message: output, think, type: toolType, data: null, totalChat: conv.length }
-					: output
-			)
-		}
+			let aggregated = ""
+			var callS = ""
+			var idCall = ""
+			var args = ""
+			var finishReason = ""
 
-		// Handle tool call if present
-		if (initTool) {
-			const args = JSON.parse(initTool.function.arguments || "{}")
-			const toolRes = await this.callToolByName(initTool.function.name, args)
-			log.info(`Tool call: `,toolRes)
-			conv.push({ role: "tool", tool_call_id: initTool.id, content: JSON.stringify(toolRes.result.data) })
-			toolType = toolRes.type
-			if (initContent.trim()) conv.push({ role: "assistant", content: initContent })
+			// Stream response
+			const stream = (await this.sendChat(conv, {
+				stream: true,
+				useTools: tool
+			})) as AsyncIterable<ChatCompletionChunk>
 
-			// Final streaming response after tool
-			const finalStream = await this.sendChat(conv, true)
-			let finalContent = ""
-			for await (const chunk of finalStream) {
-				log.info(`Final stream chunk: `,JSON.stringify(chunk))
+			var count = 0
+			for await (const chunk of stream) {
+				count++
+
+				//log.info(`${uid} > Initial stream chunk (use tool ${tool}): ${JSON.stringify(chunk)}`)
+
+				finishReason = chunk.choices[0].finish_reason || ""
 				const delta = chunk.choices[0]?.delta
-				if (delta?.content) finalContent += delta.content
-				const { response, think } = this.extractThinking(finalContent)
-				if (isEmpty(response)) continue
-				onMessage(
-					returnJson
-						? {
-								uid,
-								ask: message,
-								message: response,
-								think,
-								type: toolType,
-								data: toolRes.result.data,
-								totalChat: conv.length
-						  }
-						: response
-				)
+				if (delta?.content) aggregated += delta.content
+
+				// Check if the message is a tool call
+				if (delta?.tool_calls?.length) {
+					const call = delta.tool_calls[0]
+
+					args = call.function?.arguments || ""
+					callS = call.function?.name || ""
+					idCall = call.id || ""
+
+					// Show only the tool call line
+					var toolLine = ``
+					if (!isEmpty(callS)) {
+						toolLine = `call tool ${callS} with args: ${args}, try ${attempt}/${this.MAX_TOOL_TRIES_STREAM}, model: ${this.cfg.modelAsk}`
+					}
+
+					if (!isEmpty(toolLine))
+						onMessage(
+							returnJson
+								? {
+										uid,
+										ask: message,
+										message: toolLine,
+										think: "",
+										type: ResponseType.None,
+										data: null,
+										totalChat: conv.length
+								  }
+								: toolLine
+						)
+				}
+
+				// As long as not a pure tool call prompt, stream content
+				if (!isEmpty(aggregated)) {
+					const { response, think } = this.extractThinking(aggregated)
+					if (!isEmpty(response)) {
+						onMessage(
+							returnJson
+								? {
+										uid,
+										ask: message,
+										message: response,
+										think,
+										type: toolType,
+										data: null,
+										totalChat: conv.length
+								  }
+								: response
+						)
+					} else {
+						log.info(`T1: ${uid} > `, aggregated)
+					}
+				} else {
+					log.info(`T2: ${uid} > `, aggregated)
+				}
 			}
-		}else{
-			log.info(`No tool call found`)
+
+			//log.info(`AI: ${uid} > end current stream`)
+
+			if (callS) {
+				const toolRes = await this.callToolByName(callS, JSON.parse(args))
+				log.debug(`tool debug ${JSON.stringify(toolRes)}`)
+				
+				toolData = toolRes.result.data
+				toolType = toolRes.type
+				conv.push({ role: "tool", tool_call_id: idCall, content: JSON.stringify(toolData) })
+				tool = false // no more tool calls
+				if (!isEmpty(aggregated)) {
+					conv.push({ role: "assistant", content: aggregated })
+				} else {
+					// if no content, just think
+					conv.push({
+						role: "assistant",
+						content: `<think>I've got the data from the tool, now I'll display the results.<think>`
+					})
+				}
+				continue // retry loop
+			} else {
+				// finished without needing tool
+				conv.push({ role: "assistant", content: aggregated })
+				break
+			}
 		}
 
 		if (!remember) this.convs.delete(uid)
