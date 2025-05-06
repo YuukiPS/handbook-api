@@ -9,7 +9,7 @@ import {
 	QuestionData,
 	TypeDocumentation
 } from "@UT/response"
-import config from "@UT/config"
+import config, { GetAiServer } from "@UT/config"
 import { detectLang, LanguageGame } from "@UT/library"
 // third party
 import { isMainThread } from "worker_threads"
@@ -19,13 +19,6 @@ import { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources
 import General from "@DB/book/general"
 
 const log = new Logger(`AI`)
-
-/**
- * Constants and Configuration
- */
-const MAX_HISTORY_LENGTH = 10 // Maximum number of messages to keep in conversation history
-const MAX_SEARCH_RESULTS = 5 // Maximum number of results to return from search queries
-const SIMILARITY_MATCHES = 3 // Number of similar items to find in embeddings search
 
 // OpenAI Configuration (Source: https://github.com/YuukiPS/Chatbot/)
 const OPENAI_CONFIG = {
@@ -40,7 +33,8 @@ const OPENAI_CONFIG = {
 		"5. <think>Use this tag to analyze problems in detail before answering. Think step by step through complex issues.</think>\n" +
 		"6. ONLY THEN formulate your response based on retrieved information.\n" +
 		"7. DO NOT attempt to answer questions without using tool calls first.\n" +
-		"8. If there really is no tool available, you just answer as a Konno Yuuki (of course without a tool).",
+		"8. Your response must not be an object or JSON format and answer as a professional answer.\n" +
+		"9. If there really is no tool available, you just answer as a Konno Yuuki, just relax :)",
 
 	tools: [
 		{
@@ -63,7 +57,7 @@ const OPENAI_CONFIG = {
 								'- "minta kode id ayaka buat item" → {"search": "ayaka", "category": "Normal"}\n' +
 								'- "What is the id for ayaka?" → {"search": "ayaka"}\n' +
 								'- "give my love citlali :*" → {"search": "citlali"}\n' +
-								'- "What is the mora id for the Genshin game?" → {"search": "mora"}'
+								'- "What is id mora for Genshin game?" → {"search": "mora"}'
 						},
 						category: {
 							type: "string",
@@ -98,6 +92,8 @@ const OPENAI_CONFIG = {
 							description:
 								"Take user questions and put them here.\n\n" +
 								"Examples:\n" +
+								"How to get the Genshin ID?\n" +
+								"how do i find build id for hsr characters?\n" +
 								"how download gio?\n" +
 								"How can I delete account?\n" +
 								"Does anyone know where I can get the glider?\n" +
@@ -137,6 +133,24 @@ const OPENAI_CONFIG = {
 					required: ["command"]
 				}
 			}
+		},
+		{
+			type: "function",
+			function: {
+				name: "personal_information",
+				description:
+					"Only use this if he asks about you or the world of Sword Art Online and there is no other choice.",
+				parameters: {
+					type: "object",
+					properties: {
+						ask: {
+							type: "string",
+							description: "people's questions about you or the world of Sword Art Online."
+						}
+					},
+					required: ["ask"]
+				}
+			}
 		}
 	] as ChatCompletionTool[]
 }
@@ -156,8 +170,18 @@ interface ProcessResult {
 	message: string
 	data: null | any
 }
+interface MessageContent {
+	response: string
+	think: string
+}
 
-interface ChatResponse {
+interface ChatUserDataReq {
+	message: string
+	uid: string
+	returnJson?: boolean
+	remember?: boolean
+}
+interface ChatUserDataRsp {
 	uid: string
 	ask: string
 	message: string
@@ -167,9 +191,15 @@ interface ChatResponse {
 	totalChat: number
 }
 
-interface MessageContent {
-	response: string
-	think: string
+export interface ChatServerReq {
+	data: ChatUserDataReq
+	id: string // this id socket id or hash id
+	origin: string // this is the origin of the request, can be socket id or hash id
+}
+export interface ChatServerRsp {
+	data: ChatUserDataRsp
+	id: string
+	origin: string
 }
 
 /**
@@ -203,6 +233,20 @@ class AI {
 	private conversations: Map<string, ChatCompletionMessageParam[]> = new Map()
 	private initialized: boolean = false
 
+	private urlAsk: string = ""
+	private urlEmbed: string = ""
+	private modelAsk: string = ""
+	private modelEmbed: string = ""
+	private key: string = ""
+	private type: number = 1 // 1 = Ollama, 2 = LM-Studio
+	private temperatureAsk: number = 0.7
+	private temperatureEmbed: number = 0.7
+	private maxTokensAsk: number = 800
+	private maxTokensEmbed: number = 800
+	private maxMatch: number = 2
+	private maxSearch: number = 5
+	private maxHistory: number = 10
+
 	constructor() {
 		if (isMainThread) {
 			log.info(`AI system initializing on main thread`)
@@ -216,15 +260,34 @@ class AI {
 	 * Initialize the OpenAI client and embeddings
 	 */
 	async init(): Promise<void> {
+		var configAi = GetAiServer()
+		if (!configAi) {
+			log.error(`No AI server configuration found`)
+			return
+		}
 		try {
+			this.urlAsk = `${configAi.url}/ollama/v1/`
+			this.urlEmbed = `${configAi.url}/ollama/api/embed`
+			this.modelAsk = configAi.model.ask.id
+			this.modelEmbed = configAi.model.embed.id
+			this.key = configAi.key
+			this.type = configAi.type
+			this.temperatureAsk = configAi.model.ask.temperature
+			this.temperatureEmbed = configAi.model.embed.temperature
+			this.maxTokensAsk = configAi.model.ask.max_tokens
+			this.maxTokensEmbed = configAi.model.embed.max_tokens
+			this.maxMatch = config.ai.maxMatch
+			this.maxSearch = config.ai.maxSearch
+			this.maxHistory = config.ai.maxHistory
+
 			this.openaiClient = new OpenAI({
-				apiKey: config.ai.key,
-				baseURL: `${config.ai.baseURL}${config.ai.ask}`
+				apiKey: this.key,
+				baseURL: this.urlAsk
 			})
 
-			log.info(`AI initialized at ${config.ai.baseURL}`)
-			log.info(`Model Ask: ${config.ai.modelAsk} | URL: ${config.ai.baseURL}${config.ai.ask}`)
-			log.info(`Model Embed: ${config.ai.modelEmbed} | URL: ${config.ai.baseURL}${config.ai.embed}`)
+			log.info(`AI initialized at ${configAi.url} | Key: ${this.key}`)
+			log.info(`Model Ask: ${this.modelAsk} | URL: ${this.urlAsk}`)
+			log.info(`Model Embed: ${this.modelEmbed} | URL: ${this.urlEmbed}`)
 
 			this.initialized = true
 			log.info(`AI system ready`)
@@ -254,13 +317,13 @@ class AI {
 
 			log.info(`Embedding ${texts.length} items`)
 
-			const response = await fetch(`${config.ai.baseURL}${config.ai.embed}`, {
+			const response = await fetch(this.urlEmbed, {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
-					Authorization: `Bearer ${config.ai.key}`
+					Authorization: `Bearer ${this.key}`
 				},
-				body: JSON.stringify({ model: config.ai.modelEmbed, input: texts })
+				body: JSON.stringify({ model: this.modelEmbed, input: texts })
 			})
 
 			if (!response.ok) {
@@ -299,13 +362,13 @@ class AI {
 		try {
 			log.debug(`Creating embeddings for ${texts.length} texts`)
 
-			const response = await fetch(`${config.ai.baseURL}${config.ai.embed}`, {
+			const response = await fetch(this.urlEmbed, {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
-					Authorization: `Bearer ${config.ai.key}`
+					Authorization: `Bearer ${this.key}`
 				},
-				body: JSON.stringify({ model: config.ai.modelEmbed, input: texts })
+				body: JSON.stringify({ model: this.urlEmbed, input: texts })
 			})
 
 			if (!response.ok) {
@@ -326,6 +389,28 @@ class AI {
 		}
 	}
 
+	async processAbout(ask: string): Promise<ProcessResult> {
+		log.info(`Processing about request: ${ask}`)
+		// TODO: Implement a more sophisticated response based on the ask parameter
+		return {
+			data: {
+				name: `Konno Yuuki`,
+				age: `15`,
+				birthday: `May 23`,
+				origin: `Sword Art Online`,
+				occupation: `Maid`,
+				abilities: `Assisting players, providing information, and solving problems related to the game.`,
+				likes: `Helping players, exploring the world of SAO, and learning new things.`,
+				dislikes: `Seeing players in trouble, and not being able to help them.`,
+				interests: `Learning about the game, assisting players, and exploring new areas.`,
+				quote: `I am here to assist you, my dear player. Please let me know how I can help you today!`,
+				avatar: `https://pbs.twimg.com/media/CieFIHIU4AAnR7W.jpg`,
+				info: `Yuuki Konno is a new player who appears in ALfeim Online in volume 7. She leads the Sleeping Knights guild and quickly becomes known as one of the strongest in the game winning 67 straight matches, earning her the title of "Absolute Sword."`
+			},
+			message: ``
+		}
+	}
+
 	/**
 	 * Process item search request
 	 * @param search - Search query
@@ -339,7 +424,7 @@ class AI {
 
 			const results = await General.findItem({
 				search: search,
-				limit: MAX_SEARCH_RESULTS,
+				limit: this.maxSearch,
 				split: true,
 				type: getTypeItem(category),
 				lang: language
@@ -384,7 +469,7 @@ class AI {
 				questionEmbedding,
 				TypeDocumentation.Question,
 				{},
-				SIMILARITY_MATCHES
+				this.maxMatch
 			)) as QuestionData[]
 			log.info(`Found matches: ${JSON.stringify(topMatches)}`)
 
@@ -438,7 +523,7 @@ class AI {
 				commandEmbedding,
 				TypeDocumentation.Command,
 				searchParams,
-				SIMILARITY_MATCHES
+				this.maxMatch
 			)) as CommandData[]
 			log.info(`Found command matches: ${JSON.stringify(topMatches)}`)
 
@@ -494,9 +579,9 @@ class AI {
 		const conversation = this.conversations.get(uid)!
 
 		// Trim conversation if it gets too long
-		if (conversation.length > MAX_HISTORY_LENGTH * 2) {
+		if (conversation.length > this.maxHistory * 2) {
 			// Keep system prompt and trim oldest messages
-			const trimmed = [conversation[0], ...conversation.slice(-(MAX_HISTORY_LENGTH * 2 - 1))]
+			const trimmed = [conversation[0], ...conversation.slice(-(this.maxHistory * 2 - 1))]
 			this.conversations.set(uid, trimmed)
 			log.info(`${uid}: Trimmed conversation history from ${conversation.length} to ${trimmed.length} messages`)
 			return trimmed
@@ -518,7 +603,7 @@ class AI {
 		uid: string,
 		returnJson: boolean = false,
 		remember: boolean = true
-	): Promise<string | ChatResponse> {
+	): Promise<string | ChatUserDataRsp> {
 		if (!this.initialized) {
 			await this.init()
 		}
@@ -533,11 +618,11 @@ class AI {
 
 			// Send initial request to get tool calls
 			const initialResponse = await this.openaiClient.chat.completions.create({
-				model: config.ai.modelAsk,
+				model: this.modelAsk,
 				messages: conversation,
 				tools: OPENAI_CONFIG.tools,
-				temperature: 0.7,
-				max_tokens: 800
+				temperature: this.temperatureAsk,
+				max_tokens: this.maxTokensAsk
 			})
 
 			const initialChoice = initialResponse.choices[0]
@@ -554,7 +639,7 @@ class AI {
 				data: null
 			}
 
-			let responseType = ResponseType.Chat
+			let responseType = ResponseType.None
 
 			// Handle tool calls if present
 			if (initialChoice.finish_reason === "tool_calls" && initialMessage.tool_calls?.length) {
@@ -577,6 +662,10 @@ class AI {
 					case "find_command":
 						processResult = await this.processCommandSearch(args.command, args.type)
 						responseType = ResponseType.CommandHelper
+						break
+					case "personal_information":
+						processResult = await this.processAbout(args.ask)
+						responseType = ResponseType.Chat
 						break
 					default:
 						log.warn(`${uid} > Unknown tool called: ${name}`)
@@ -612,10 +701,10 @@ class AI {
 				log.info(`${uid} > Getting final response...`)
 
 				const finalResponse = await this.openaiClient.chat.completions.create({
-					model: config.ai.modelAsk,
+					model: this.modelAsk,
 					messages: conversation,
-					temperature: 0.7,
-					max_tokens: 800
+					temperature: this.temperatureAsk,
+					max_tokens: this.maxTokensAsk,
 				})
 
 				finalChoice = finalResponse.choices[0]
