@@ -75,6 +75,9 @@ export const _ = acfg({
 					id: "",
 					token: ""
 				}
+			},
+			ai: {
+				channel: [""]
 			}
 		}
 	},

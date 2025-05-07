@@ -24,7 +24,6 @@ import {
 } from "openai/resources/chat/completions"
 // database
 import General from "@DB/book/general"
-import { on } from "events"
 
 const log = new Logger(`AI`)
 
@@ -51,6 +50,7 @@ const OPENAI_CONFIG = {
 				name: "find_id",
 				description:
 					"Searches for game item IDs in the database. ONLY use this function when looking up specific game item IDs for use with commands",
+				strict: true,
 				parameters: {
 					type: "object",
 					properties: {
@@ -72,17 +72,18 @@ const OPENAI_CONFIG = {
 							description:
 								"Filters the search by category.\n\n" +
 								"ADDITIONAL RULES FOR CATEGORIES:\n" +
-								`1. ALWAYS extract category from these exact values: ${getAllTypeItem().join(", ")}\n` +
-								"2. Additional info: Item=Normal, Mission/Story=Quest).\n" +
-								"3. If category is not mentioned, use 'None' as default.\n" +
-								"4. NEVER modify category names - use exact enum values.\n\n" +
+								"1. Additional info: Item=Normal, Mission/Story=Quest).\n" +
+								"2. If category is not mentioned, use 'None' as default.\n" +
+								"3. NEVER modify category names - use exact enum values.\n\n" +
 								"Examples:\n" +
 								'- "avatar ayaka" → {"category": "avatar"}\n' +
 								'- "ayaka avatar" → {"category": "avatar"}\n' +
-								'- "item mora" → {"category": "normal"}'
+								'- "item mora" → {"category": "normal"}',
+							enum: getAllTypeItem()
 						}
 					},
-					required: ["search"]
+					required: ["search", "category"],
+					additionalProperties: false
 				}
 			}
 		},
@@ -92,6 +93,7 @@ const OPENAI_CONFIG = {
 				name: "find_document",
 				description:
 					"Use this for searches for answers to general questions, if no other function is suitable this is the last option ",
+				strict: true,
 				parameters: {
 					type: "object",
 					properties: {
@@ -111,7 +113,8 @@ const OPENAI_CONFIG = {
 								"How to fix error code 4214?\n"
 						}
 					},
-					required: ["question"]
+					required: ["question"],
+					additionalProperties: false
 				}
 			}
 		},
@@ -122,6 +125,7 @@ const OPENAI_CONFIG = {
 				description:
 					"ONLY use this to search for specific command syntax, usage, and descriptions. " +
 					"This is for finding how to use specific commands in the game console, NOT for general game questions or issues.",
+				strict: true,
 				parameters: {
 					type: "object",
 					properties: {
@@ -138,7 +142,8 @@ const OPENAI_CONFIG = {
 							enum: getAllGameEngine()
 						}
 					},
-					required: ["command"]
+					required: ["command", "type"],
+					additionalProperties: false
 				}
 			}
 		},
@@ -159,6 +164,13 @@ const OPENAI_CONFIG = {
 					required: ["ask"]
 				}
 			}
+		},
+		{
+			type: "function",
+			function: {
+				name: "reset_conversation",
+				description: "Use this if the user asks you to reset/delete the chat/conversation, or end the question."
+			}
 		}
 	] as ChatCompletionTool[]
 }
@@ -168,7 +180,8 @@ enum ResponseType {
 	Chat,
 	Item,
 	Answer,
-	CommandHelper
+	CommandHelper,
+	AiHelper
 }
 interface ProcessResult {
 	message: string
@@ -277,7 +290,10 @@ class AI {
 			headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.cfg.key}` },
 			body: JSON.stringify({ model: this.cfg.modelEmbed, input: texts })
 		})
-		if (!res.ok) throw new Error(`Embedding failed: ${await res.text()}`)
+		if (!res.ok) {
+			log.error(`Error creating embedding: ${res.status} ${res.statusText}`)
+			return []
+		}
 		const json = await res.json()
 		return json.embeddings || json.data.map((d: any) => d.embedding)
 	}
@@ -295,6 +311,8 @@ class AI {
 				}
 			case "personal_information":
 				return { result: await this.processAbout(args.ask), type: ResponseType.Chat }
+			case "reset_conversation":
+				return { result: { data: null, message: "reset" }, type: ResponseType.Chat }
 			default:
 				throw new Error(`Unknown tool: ${name}`)
 		}
@@ -310,9 +328,8 @@ class AI {
 				type: getTypeItem(category),
 				lang
 			})
-			if (!res.data?.length) return { data: null, message: `No items for "${search}" in "${category}"` }
-			const msg = res.data.map((i) => `${i.name} (ID: ${i.id})`).join("\n")
-			return { data: res.data, message: `Found ${res.data.length} items:\n${msg}` }
+			if (!res.data?.length) return { data: null, message: `No Found` }
+			return { data: res.data, message: `Found` }
 		} catch (e) {
 			return { data: null, message: `Error: ${e}` }
 		}
@@ -321,15 +338,16 @@ class AI {
 	private async processDocumentSearch(question: string): Promise<ProcessResult> {
 		try {
 			const [embed] = await this.createEmbedding([question])
+			if (!embed) return { data: null, message: `error search` }
+
 			const top = (await General.findTopKSimilar(
 				embed,
 				TypeDocumentation.Question,
 				{},
 				this.cfg.maxMatch
 			)) as QuestionData[]
-			if (!top.length) return { data: null, message: `No info for "${question}"` }
-			const msg = top.map((i) => `Q: ${i.question}\nA: ${i.answer}`).join("\n\n")
-			return { data: top, message: `Found ${top.length} answers:\n${msg}` }
+			if (!top.length) return { data: null, message: `No Found` }
+			return { data: top, message: `Found` }
 		} catch (e) {
 			return { data: null, message: `Error: ${e}` }
 		}
@@ -338,6 +356,8 @@ class AI {
 	private async processCommandSearch(command: string, type: string): Promise<ProcessResult> {
 		try {
 			const [embed] = await this.createEmbedding([command])
+			if (!embed) return { data: null, message: `error` }
+
 			const searchParams: Partial<CommandData> = {
 				typeEngine: getTypeGameEngine(type)
 			}
@@ -347,23 +367,22 @@ class AI {
 				searchParams,
 				this.cfg.maxMatch
 			)) as CommandData[]
-			if (!top.length) return { data: null, message: `No commands for "${command}"` }
+			if (!top.length) return { data: null, message: `No Found` }
 			const formatted = top.map((m) => ({
 				command: m.command,
 				description: m.description,
 				usage: m.usage,
 				type: getStringTypeGameEngine(m.typeEngine)
 			}))
-			const msg = formatted
-				.map((i) => `Cmd: ${i.command}\nDesc: ${i.description}\nUsage: ${i.usage}\nGame: ${i.type}`)
-				.join("\n\n")
-			return { data: formatted, message: `Found ${formatted.length} commands:\n${msg}` }
+			return { data: formatted, message: `Found` }
 		} catch (e) {
 			return { data: null, message: `Error: ${e}` }
 		}
 	}
 
-	private async processAbout(ask: string): Promise<ProcessResult> {
+	async processAbout(ask: string): Promise<ProcessResult> {
+		log.info(`Processing about request: ${ask}`)
+		// TODO: Implement a more sophisticated response based on the ask parameter
 		return {
 			data: {
 				name: `Konno Yuuki`,
@@ -371,15 +390,15 @@ class AI {
 				birthday: `May 23`,
 				origin: `Sword Art Online`,
 				occupation: `Maid`,
-				abilities: `Assisting players, providing info.`,
-				likes: `Helping players.`,
-				dislikes: `Seeing players in trouble.`,
-				interests: `Learning game, exploring.`,
-				quote: `I am here to assist you, my dear player!`,
+				abilities: `Assisting players, providing information, and solving problems related to the game.`,
+				likes: `Helping players, exploring the world of SAO, and learning new things.`,
+				dislikes: `Seeing players in trouble, and not being able to help them.`,
+				interests: `Learning about the game, assisting players, and exploring new areas.`,
+				quote: `I am here to assist you, my dear player. Please let me know how I can help you today!`,
 				avatar: `https://pbs.twimg.com/media/CieFIHIU4AAnR7W.jpg`,
-				info: `Yuuki Konno appears in ALFeim Online, volume 7...`
+				info: `Yuuki Konno is a new player who appears in ALfeim Online in volume 7. She leads the Sleeping Knights guild and quickly becomes known as one of the strongest in the game winning 67 straight matches, earning her the title of "Absolute Sword."`
 			},
-			message: ""
+			message: `Found`
 		}
 	}
 
@@ -479,6 +498,7 @@ class AI {
 		let attempt = 0
 		let toolData: any = null
 		let toolType = ResponseType.None
+		let toolMsg = ""
 		var tool = true
 
 		while (attempt < this.MAX_TOOL_TRIES_STREAM) {
@@ -488,21 +508,34 @@ class AI {
 			var callS = ""
 			var idCall = ""
 			var args = ""
-			var finishReason = ""
 
-			// Stream response
-			const stream = (await this.sendChat(conv, {
-				stream: true,
-				useTools: tool
-			})) as AsyncIterable<ChatCompletionChunk>
+			var stream: AsyncIterable<ChatCompletionChunk> | null = null
+			try {
+				stream = await this.sendChat(conv, {
+					stream: true,
+					useTools: tool
+				})
+			} catch (error) {
+				log.errorNoStack(`Error in chatStream:`, error)
+				const msg = "Sorry, I'm unable to fetch the information right now."
+				conv.push({ role: "assistant", content: msg })
+				onMessage(
+					returnJson
+						? {
+								uid,
+								ask: message,
+								message: msg,
+								think: "",
+								type: ResponseType.None,
+								data: null,
+								totalChat: conv.length
+						  }
+						: msg
+				)
+				return
+			}
 
-			var count = 0
 			for await (const chunk of stream) {
-				count++
-
-				//log.info(`${uid} > Initial stream chunk (use tool ${tool}): ${JSON.stringify(chunk)}`)
-
-				finishReason = chunk.choices[0].finish_reason || ""
 				const delta = chunk.choices[0]?.delta
 				if (delta?.content) aggregated += delta.content
 
@@ -561,29 +594,33 @@ class AI {
 				}
 			}
 
-			//log.info(`AI: ${uid} > end current stream`)
-
 			if (callS) {
 				const toolRes = await this.callToolByName(callS, JSON.parse(args))
-				log.debug(`tool debug ${JSON.stringify(toolRes)}`)
-				
+				//log.info(`tool debug ${JSON.stringify(toolRes)}`)
 				toolData = toolRes.result.data
+				toolMsg = toolRes.result.message
 				toolType = toolRes.type
-				conv.push({ role: "tool", tool_call_id: idCall, content: JSON.stringify(toolData) })
-				tool = false // no more tool calls
-				if (!isEmpty(aggregated)) {
-					conv.push({ role: "assistant", content: aggregated })
-				} else {
-					// if no content, just think
-					conv.push({
-						role: "assistant",
-						content: `<think>I've got the data from the tool, now I'll display the results.<think>`
-					})
+				if (toolType === ResponseType.Chat) {
+					if (toolRes.result.message.includes("reset")) {
+						this.convs.delete(uid)
+						aggregated = "<think>Reset conversation</think>"
+					}
 				}
+				
+				if(!isEmpty(toolData)) {
+					conv.push({ role: "tool", tool_call_id: idCall, content: `${toolMsg}: ${JSON.stringify(toolData)}` })
+					tool = false
+					log.info(`Tool found ${callS}: ${JSON.stringify(toolData)} with message: ${toolMsg}`);
+				}else{
+					aggregated = `<think>${toolMsg}</think>`
+					log.info(`Tool not found: ${toolMsg}`)
+				}
+				
+				if (!isEmpty(aggregated)) conv.push({ role: "assistant", content: aggregated })
 				continue // retry loop
 			} else {
 				// finished without needing tool
-				conv.push({ role: "assistant", content: aggregated })
+				if (!isEmpty(aggregated)) conv.push({ role: "assistant", content: aggregated })
 				break
 			}
 		}
