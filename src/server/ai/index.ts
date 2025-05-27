@@ -219,8 +219,8 @@ class AI {
 	private client!: OpenAI
 	private convs = new Map<string, ChatCompletionMessageParam[]>()
 	private initialized = false
-	private readonly MAX_TOOL_TRIES_STREAM = 15
-	private readonly MAX_TOOL_TRIES_NOSTREAM = 3
+	private readonly MAX_TOOL_TRIES_STREAM = 6
+	private readonly MAX_TOOL_TRIES_NOSTREAM = 2
 	private cfg = {
 		urlAsk: "",
 		urlEmbed: "",
@@ -303,6 +303,7 @@ class AI {
 			case "find_id":
 				return { result: await this.processItemSearch(args.search, args.category), type: ResponseType.Item }
 			case "find_document":
+			case "question":
 				return { result: await this.processDocumentSearch(args.question), type: ResponseType.Answer }
 			case "find_command":
 				return {
@@ -312,9 +313,9 @@ class AI {
 			case "personal_information":
 				return { result: await this.processAbout(args.ask), type: ResponseType.Chat }
 			case "reset_conversation":
-				return { result: { data: null, message: "reset" }, type: ResponseType.Chat }
+				return { result: { data: "conversation reset", message: "reset" }, type: ResponseType.Chat }
 			default:
-				throw new Error(`Unknown tool: ${name}`)
+				return { result: { data: null, message: "unknown" }, type: ResponseType.None }
 		}
 	}
 
@@ -328,7 +329,7 @@ class AI {
 				type: getTypeItem(category),
 				lang
 			})
-			if (!res.data?.length) return { data: null, message: `No Found` }
+			if (!res.data?.length) return { data: null, message: `No Found ${search} ${category}` }
 			return { data: res.data, message: `Found` }
 		} catch (e) {
 			return { data: null, message: `Error: ${e}` }
@@ -346,7 +347,7 @@ class AI {
 				{},
 				this.cfg.maxMatch
 			)) as QuestionData[]
-			if (!top.length) return { data: null, message: `No Found` }
+			if (!top.length) return { data: null, message: `No Found ${question}` }
 			return { data: top, message: `Found` }
 		} catch (e) {
 			return { data: null, message: `Error: ${e}` }
@@ -367,7 +368,7 @@ class AI {
 				searchParams,
 				this.cfg.maxMatch
 			)) as CommandData[]
-			if (!top.length) return { data: null, message: `No Found` }
+			if (!top.length) return { data: null, message: `No Found ${command} ${type}` }
 			const formatted = top.map((m) => ({
 				command: m.command,
 				description: m.description,
@@ -500,6 +501,8 @@ class AI {
 		let toolType = ResponseType.None
 		let toolMsg = ""
 		var tool = true
+		var end = false
+		var realend = false
 
 		while (attempt < this.MAX_TOOL_TRIES_STREAM) {
 			attempt++
@@ -510,6 +513,11 @@ class AI {
 			var args = ""
 
 			var stream: AsyncIterable<ChatCompletionChunk> | null = null
+
+			if (end) {
+				realend = true
+			}
+
 			try {
 				stream = await this.sendChat(conv, {
 					stream: true,
@@ -536,7 +544,8 @@ class AI {
 			}
 
 			for await (const chunk of stream) {
-				const delta = chunk.choices[0]?.delta
+				var c = chunk.choices[0]
+				const delta = c?.delta
 				if (delta?.content) aggregated += delta.content
 
 				// Check if the message is a tool call
@@ -569,6 +578,8 @@ class AI {
 						)
 				}
 
+				//log.info(`Stream chunk: ${JSON.stringify(chunk)}`)
+
 				// As long as not a pure tool call prompt, stream content
 				if (!isEmpty(aggregated)) {
 					const { response, think } = this.extractThinking(aggregated)
@@ -586,6 +597,11 @@ class AI {
 								  }
 								: response
 						)
+						if (c.finish_reason === "stop") {
+							log.info(`finish reason: ${c.finish_reason} at ${aggregated}`)
+							realend = true
+							//remember = false
+						}
 					} else {
 						log.info(`T1: ${uid} > `, aggregated)
 					}
@@ -594,36 +610,66 @@ class AI {
 				}
 			}
 
+			var noreset = true
 			if (callS) {
+				var final_msg = aggregated
 				const toolRes = await this.callToolByName(callS, JSON.parse(args))
 				//log.info(`tool debug ${JSON.stringify(toolRes)}`)
 				toolData = toolRes.result.data
 				toolMsg = toolRes.result.message
 				toolType = toolRes.type
-				if (toolType === ResponseType.Chat) {
-					if (toolRes.result.message.includes("reset")) {
-						this.convs.delete(uid)
-						aggregated = "<think>Reset conversation</think>"
+
+				if (toolMsg.includes("reset")) {
+					remember = false
+					noreset = false
+				}
+
+				if (!isEmpty(toolData)) {
+					final_msg = `${toolMsg}: ${JSON.stringify(toolData)}`
+					tool = false
+					log.info(`Tool found ${callS}: ${JSON.stringify(toolData)} with message: ${toolMsg}`)
+				} else {
+					final_msg = `${toolMsg}, try ${attempt}/${this.MAX_TOOL_TRIES_STREAM}`
+					log.info(
+						`Tool not found: ${toolMsg} at ${callS}, try ${attempt}/${this.MAX_TOOL_TRIES_STREAM} at ${aggregated}`
+					)
+					if (attempt + 1 >= this.MAX_TOOL_TRIES_STREAM) {
+						tool = false
+						end = true
+						//realend = true
+						final_msg = `<think>Tool not found, so I ended it</think>`
 					}
 				}
-				
-				if(!isEmpty(toolData)) {
-					conv.push({ role: "tool", tool_call_id: idCall, content: `${toolMsg}: ${JSON.stringify(toolData)}` })
-					tool = false
-					log.info(`Tool found ${callS}: ${JSON.stringify(toolData)} with message: ${toolMsg}`);
-				}else{
-					aggregated = `<think>${toolMsg}</think>`
-					log.info(`Tool not found: ${toolMsg}`)
+
+				if (!isEmpty(final_msg) && noreset) {
+					conv.push({
+						role: "tool",
+						tool_call_id: idCall,
+						content: final_msg
+					})
 				}
-				
-				if (!isEmpty(aggregated)) conv.push({ role: "assistant", content: aggregated })
-				continue // retry loop
+
+				//continue // retry loop
+				//return;
 			} else {
-				// finished without needing tool
-				if (!isEmpty(aggregated)) conv.push({ role: "assistant", content: aggregated })
+				log.info(`no call, so end at try ${attempt}/${this.MAX_TOOL_TRIES_STREAM} at ${aggregated}`, conv)
+				if (tool) {
+					aggregated = `<think>I thought I didn't find anything so I ended it, by notifying the user</think>`
+				} else {
+					aggregated = `just end it because I found the answer, so answer it use data tool without thinking again`
+					end = true
+				}
+				if (!realend && noreset) conv.push({ role: "assistant", content: aggregated })
+				tool = false
+			}
+
+			if (realend) {
+				//log.info(`Final end at try ${attempt}/${this.MAX_TOOL_TRIES_STREAM} at ${aggregated}`, conv)
 				break
 			}
 		}
+
+		log.info(`Final attempt ${attempt}/${this.MAX_TOOL_TRIES_STREAM}`, conv)
 
 		if (!remember) this.convs.delete(uid)
 	}

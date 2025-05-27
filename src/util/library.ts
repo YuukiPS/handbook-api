@@ -103,19 +103,6 @@ export async function DownloadFile(link: string, fileFullPath: string, maxRetrie
 	const dir = path.dirname(fileFullPath)
 	await fs.mkdir(dir, { recursive: true }).catch((err) => log.errorNoStack(`Failed to create directory: ${dir}`, err))
 
-	const fileExists = await fs
-		.access(fileFullPath)
-		.then(() => true)
-		.catch(() => false)
-
-	if (fileExists) {
-		const isRemove = await fs
-			.unlink(fileFullPath)
-			.then(() => true)
-			.catch(() => false)
-		log.warn(`Found file ${fileFullPath}, removed: ${isRemove}`)
-	}
-
 	log.debug(`Start downloading file: ${fileName} from ${link}`)
 
 	let attempt = 0
@@ -139,6 +126,19 @@ export async function DownloadFile(link: string, fileFullPath: string, maxRetrie
 				log.errorNoStack(`File failed to download ${link}:`, response.statusText)
 				attempt++
 				continue
+			}
+
+			const fileExists = await fs
+				.access(fileFullPath)
+				.then(() => true)
+				.catch(() => false)
+
+			if (fileExists) {
+				const isRemove = await fs
+					.unlink(fileFullPath)
+					.then(() => true)
+					.catch(() => false)
+				log.warn(`Found file ${fileFullPath}, removed: ${isRemove}`)
 			}
 
 			const totalLength = Number(response.headers["content-length"]) || 0
@@ -341,7 +341,6 @@ export function createEnum(keys: string[], nameFunc: string): string {
 }
 
 export function LanguageGame(i: string): string {
-
 	// Normalize the input for matching (lowercase for locale mapping)
 	const normalizedInput = i.trim().toLowerCase()
 
@@ -360,4 +359,59 @@ export async function detectLang(text: string): Promise<string> {
 	const identifier = cldFactory.create(0, 1000)
 	const findResult = identifier.findLanguage(text)
 	return findResult?.language || "en_US"
+}
+
+interface SystemUsage {
+	memory: {
+		totalMB: number
+		usedMB: number
+		freeMB: number
+		usagePercent: number // 0-100
+	}
+	cpu: {
+		cores: number
+		usagePercent: number // 0-100 average across all cores
+	}
+}
+
+/**
+ * Returns system memory and CPU usage.
+ * CPU percent is sampled over a short interval (default 100ms).
+ * @param sampleMs Duration in milliseconds to sample CPU usage
+ */
+export async function getSystemUsage(sampleMs = 100): Promise<SystemUsage> {
+	// Memory metrics
+	const totalMem = os.totalmem()
+	const freeMem = os.freemem()
+	const usedMem = totalMem - freeMem
+	const memUsagePercent = (usedMem / totalMem) * 100
+
+	// CPU metrics: sample usage over time
+	const startUsage = process.cpuUsage()
+	const startTime = process.hrtime.bigint()
+
+	await new Promise((resolve) => setTimeout(resolve, sampleMs))
+
+	const endUsage = process.cpuUsage(startUsage)
+	const endTime = process.hrtime.bigint()
+	const elapsedNs = Number(endTime - startTime)
+	const elapsedUs = elapsedNs / 1000
+
+	const totalCpuTimeUs = endUsage.user + endUsage.system
+	const cores = os.cpus().length
+	// Percent CPU = (cpuTime / (elapsedTime * cores)) * 100
+	const cpuUsagePercent = (totalCpuTimeUs / (elapsedUs * cores)) * 100
+
+	return {
+		memory: {
+			totalMB: totalMem / 1024 / 1024,
+			usedMB: usedMem / 1024 / 1024,
+			freeMB: freeMem / 1024 / 1024,
+			usagePercent: memUsagePercent
+		},
+		cpu: {
+			cores,
+			usagePercent: cpuUsagePercent
+		}
+	}
 }

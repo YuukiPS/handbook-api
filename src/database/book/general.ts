@@ -549,18 +549,19 @@ export const _ = {
 		sourceUrlorLocal: string, // local file/url dump (private)
 		localFile: string, // local file (public)
 		urlPublic: string, // url public
-		fallbackUrl: string = "" // fallback url
+		fallbackUrl: string = "", // fallback url
+		replace: boolean = false
 	): Promise<string> {
 		if (!sourceUrlorLocal) return ""
 
-		if (await fileExists(localFile)) {
+		if (await fileExists(localFile) && !replace) {
 			log.debug(`File1 ${localFile} already exists`)
 			// TODO: check if real valid file use md5 between local and remote
 			return urlPublic
 		}
 
 		const isRemote = isValidUrl(sourceUrlorLocal)
-		log.info(`isRemote: ${isRemote} for ${sourceUrlorLocal} > ${localFile} > ${urlPublic}`)
+		log.info(`isRemote: ${isRemote} for ${sourceUrlorLocal} > ${localFile} > ${urlPublic} | replace: ${replace} | fallback: ${fallbackUrl}`)
 
 		if (isRemote) {
 			log.info(`Downloading ${sourceUrlorLocal} to ${localFile}`)
@@ -579,10 +580,10 @@ export const _ = {
 				await fs.copyFile(sourceUrlorLocal, localFile)
 				return urlPublic
 			} else {
-				log.errorNoStack(`File ${sourceUrlorLocal} does not exist`)
+				//log.errorNoStack(`File ${sourceUrlorLocal} does not exist`)
 				if (fallbackUrl) {
-					log.info(`Using fallback URL: ${fallbackUrl}`)
-					return this.downloadImageOrCopyLocal(fallbackUrl, localFile, urlPublic, "")
+					log.info(`File local not found, using fallback URL: ${fallbackUrl}`)
+					return this.downloadImageOrCopyLocal(fallbackUrl, localFile, urlPublic, "", replace)
 				} else {
 					log.errorNoStack(`No fallback URL provided`)
 					return ""

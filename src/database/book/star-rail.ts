@@ -40,6 +40,7 @@ import { domainPublic } from "@UT/config"
 
 const nameGame = "star-rail"
 const typeGame = 2
+const assetImageBackup = `https://api.hakush.in`
 
 const log = new Logger(nameGame.replace("-", " ").toLocaleUpperCase())
 
@@ -354,7 +355,7 @@ class SR {
 			}
 			results = await cursor.toArray()
 		}
-		
+
 		log.info(`sea > ${results.length}x`, filter)
 
 		return {
@@ -694,6 +695,7 @@ class SR {
 			const rank = item.Rarity
 			const iconPath = item.ItemIconPath.toLocaleLowerCase()
 			const iconName = path.basename(iconPath)
+			const iconNameNoLower = path.basename(item.ItemIconPath)
 
 			// Config
 			var infoItem = Object.values(getRelicConfig).find((item) => item.ID === id)
@@ -755,7 +757,8 @@ class SR {
 				`${DUMP_SR}/${iconPath}`, // local file dump (private)
 				`${FOLDER_SR}/icon/relic/${iconName}`, // local file (public)
 				`${domainPublic}/resources/${nameGame}/icon/relic/${iconName}`, // url public
-				`` // fallback url
+				`${assetImageBackup}/hsr/UI/relicfigures/${iconNameNoLower.replace(".png", "")}.webp`,
+				replace
 			)
 
 			//log.info("Relic config:", obj)
@@ -1071,7 +1074,8 @@ class SR {
 					`${DUMP_SR}/${iconPath}`, // local file dump (private)
 					`${FOLDER_SR}/icon/weapon/${id}.png`, // local file (public)
 					`${domainPublic}/resources/${nameGame}/icon/weapon/${id}.png`, // url public
-					`https://api.hakush.in/hsr/UI/lightconemediumicon/${id}.webp` // TODO: find fallback url
+					`${assetImageBackup}/hsr/UI/lightconemediumicon/${id}.webp`,
+					replace
 				)
 				// https://sr.yatta.moe/hsr/assets/UI//equipment/medium/${id}.png
 
@@ -1165,7 +1169,7 @@ class SR {
 						`${DUMP_SR}/${iconPath}`, // local file dump (private)
 						`${FOLDER_SR}/icon/monster/${id}.png`, // local file (public)
 						`${domainPublic}/resources/${nameGame}/icon/monster/${id}.png`, // url public
-						`` // TODO: find fallback url
+						`${assetImageBackup}/hsr/UI/monstermiddleicon/Monster_${id}.webp`
 					)
 				}
 
@@ -1257,12 +1261,23 @@ class SR {
 					}
 
 					if (!isEmpty(iconPath)) {
+						const parts = data.ItemIconPath.split("/")
+						const folderName = parts[parts.length - 2].replace("ItemIcon", "itemfigures")
+						//console.log("folderName", parts)
+						
+						const fileNameWithExtension = parts[parts.length - 1]
+						const fileName = fileNameWithExtension.replace(".png", "") // "4006_2"
+
+						log.info(`${folderName} > ${fileName} > ${iconPath}`)
+
 						obj.icon = await General.downloadImageOrCopyLocal(
 							`${DUMP_SR}/${iconPath}`, // local file dump (private)
 							`${FOLDER_SR}/icon/item/${id}.png`, // local file (public)
 							`${domainPublic}/resources/${nameGame}/icon/item/${id}.png`, // url public
-							`` // TODO: find fallback url
+							`${assetImageBackup}/hsr/UI/${folderName}/${fileName}.webp`, // TODO: find fallback url
+							replace
 						)
+						// https://api.hakush.in/hsr/UI/itemfigures/900001.webp
 					}
 
 					// add desc
@@ -1387,9 +1402,9 @@ class SR {
 					`${DUMP_SR}/${iconPath}`, // local file dump (private)
 					`${FOLDER_SR}/icon/avatar/${id}.png`, // local file (public)
 					`${domainPublic}/resources/${nameGame}/icon/avatar/${id}.png`, // url public
-					`https://api.hakush.in/hsr/UI/avatarroundicon/${id}.webp` // fallback url
+					`${assetImageBackup}/hsr/UI/avatarshopicon/${id}.webp`,
+					replace
 				)
-				// https://enka.network/ui/hsr/SpriteOutput/AvatarRoundIcon/${id}.png
 
 				// add desc
 				if (infoCard.ItemBGDesc && !isEmpty(infoCard.ItemBGDesc.Hash)) {
