@@ -1,8 +1,13 @@
 import express, { Request, Response } from "express"
-import General from "@DB/book/general"
 import AI from "@SV/ai"
-import SRTool from "@DB/book/star-rail"
 import Logger from "@UT/logger"
+import { getTimeV2, isEmpty } from "@UT/library"
+
+import SRTool from "@DB/book/star-rail"
+import General from "@DB/book/general"
+import Yuuki from "@DB/book/yuuki"
+import { AccountDB, BuildData, SRToolsReq } from "@UT/response"
+
 const r = express.Router()
 
 const log = new Logger("Web")
@@ -95,6 +100,192 @@ r.all("/build/sr", async (req: Request, res: Response) => {
 		recommendation
 	})
 	res.json(tes)
+})
+r.all("/srtool/:id", async (req: Request, res: Response) => {
+	var b = req.body
+	var p = req.params
+	var q = req.query
+
+	var uid = b.username
+	var code = b.password
+	if (isEmpty(uid)) {
+		return res.status(401).send(`Username is required`)
+	}
+	if (isEmpty(code)) {
+		return res.status(401).send(`Password is required`)
+	}
+
+	var server_id = (p.id as string) ?? ""
+
+	log.warn({
+		name: "srtool",
+		query: q,
+		body: b,
+		params: p,
+		header: req.headers,
+		cookie: req.cookies
+	})
+
+	var server = await Yuuki.getServerProfile(server_id)
+	if (!server.data) {
+		log.warn(`Server with ID ${server_id} not found`)
+		return res.status(404).send(`Server with ID ${server_id} not found`)
+	}
+	log.warn("Server data", server)
+	var type_game = server.data.game
+	var type_engine = server.data.engine
+	if (type_game != 2 || type_engine != 5) {
+		log.warn(`Server with ID ${server_id} is not a valid SRTools`)
+		return res
+			.status(404)
+			.send(`Server with ID ${server_id} is not a valid SR Tools server [${type_game}, ${type_engine}]`)
+	}
+
+	var rPlayer = await Yuuki.GET_BASIC_BY_UID_PLAYER(uid, server_id)
+	log.warn("rPlayer", rPlayer)
+
+	var dataPlayer = rPlayer.data
+	if (dataPlayer) {
+		var rAccount = await Yuuki.GET_ACCOUNT_BY_UID(dataPlayer.accountId)
+		log.warn("rAccount", rAccount)
+
+		if (rAccount.data) {
+			var dataAccount = rAccount.data as AccountDB
+			if (dataAccount.tokenAPI != code) {
+				log.warn("Code mismatch", dataAccount.tokenAPI, code)
+				return res.status(401).send(`Code mismatch for player ${uid} in server ${server_id}`)
+			}
+			var dataSync = b.data as SRToolsReq
+			if (!isEmpty(dataSync)) {
+				var build: BuildData[] = []
+
+				// Avatar
+				var avatar = dataSync.avatars
+				if (!isEmpty(avatar)) {
+					for (const a of Object.values(avatar)) {
+						const obj: BuildData = {
+							owner: parseInt(dataPlayer.accountId),
+							title: `Build for ${dataPlayer.uid} in ${server_id}`,
+							avatar: {
+								id: a.avatar_id,
+								level: a.level,
+								rank: a.data.rank, // Promotion is the same as rank in SR?
+								promotion: a.promotion,
+								skills: a.data.skills
+							},
+							vote: 0,
+							time: getTimeV2(true),
+							update: getTimeV2(true),
+							relic: [],
+							_id: 0
+						}
+						// Check for duplicate avatar_id before adding
+						if (!build.some((b) => b.avatar?.id === a.avatar_id)) {
+							build.push(obj)
+						} else {
+							log.warn(
+								`Duplicate avatar_id ${a.avatar_id} found for player ${dataPlayer.uid} in server ${server_id}`
+							)
+						}
+					}
+				}
+
+				// Relic
+				var relic = dataSync.relics
+				if (!isEmpty(relic)) {
+					for (const r of Object.values(relic)) {
+						// Find the build with the matching avatar_id
+						const buildIndex = build.findIndex((b) => b.avatar?.id === r.equip_avatar)
+						if (buildIndex !== -1 && build[buildIndex]?.relic) {
+							build[buildIndex].relic.push({
+								id: r.relic_id,
+								main: r.main_affix_id, // TODO: SetId in LC is auto?
+								sub: [],
+								level: r.level,
+								count: 1,
+								sort: true // TODO: handle sort logic if needed
+							})
+							// add sub stats if available
+							if (r.sub_affixes && r.sub_affixes.length > 0) {
+								build[buildIndex].relic[build[buildIndex].relic.length - 1].sub = r.sub_affixes.map(
+									(s) => ({
+										id: s.sub_affix_id,
+										count: s.count,
+										step: s.step
+									})
+								)
+							} else {
+								log.warn(
+									`No sub affixes found for relic ${r.relic_id} for player ${dataPlayer.uid} in server ${server_id}`
+								)
+							}
+						} else {
+							log.warn(
+								`No build found for avatar id ${r.equip_avatar} when adding relic ${r.relic_id} for player ${dataPlayer.uid} in server ${server_id}`
+							)
+						}
+					}
+				}
+
+				// Equipment
+				var equipment = dataSync.lightcones
+				if (!isEmpty(equipment)) {
+					for (const e of Object.values(equipment)) {
+						// Find the build with the matching avatar_id
+						const buildIndex = build.findIndex((b) => b.avatar?.id === e.equip_avatar)
+						if (buildIndex !== -1) {
+							build[buildIndex].equipment = {
+								id: e.item_id,
+								level: e.level,
+								promotion: e.promotion, // Promotion is the same as rank in SR?
+								rank: e.rank // Rank is the same as superimposition in SR?
+							}
+						} else {
+							log.warn(
+								`No build found for avatar id ${e.equip_avatar} when adding equipment ${e.item_id} for player ${dataPlayer.uid} in server ${server_id}`
+							)
+						}
+					}
+				}
+
+				// Sync builds
+				// In SRTool, does everything sync? In our version, we only sync the build avatar and maybe later there will be a team build version available
+				if (build.length > 0) {
+					log.info(`sync ${build.length} builds for player ${dataPlayer.uid} in server ${server_id}`)
+					for (const b of build) {
+						log.info(
+							`Build (${b.avatar?.id}) - ${b.title} - ${b.relic?.length} relics - ${
+								b.equipment?.id || "No Equipment"
+							}`
+						)
+						// TODO: send to game server for sync and maybe save in database
+						//log.info(`debug build: ${JSON.stringify(b, null, 2)}`)
+					}
+					var tesSync = await Yuuki.SyncSRData(
+						server.data.api.url,
+						dataPlayer.uid,
+						server.data.api.passwrod_private,
+						{
+							data: build,
+							retcode: 0,
+							message: "api_sync_srdata_ok"
+						}
+					)
+					log.info(`Sync result: `, tesSync)
+				} else {
+					log.warn(`No builds found to sync for player ${dataPlayer.uid} in server ${server_id}`)
+				}
+			}
+		} else {
+			log.warn("Account not found", rAccount.message)
+			return res.status(404).send(`Account with UID ${dataPlayer.accountId} not found in server ${server_id}`)
+		}
+	} else {
+		log.warn("Player not found", rPlayer.message)
+		return res.status(404).send(`Player with UID ${uid} not found in server ${server_id}`)
+	}
+
+	return res.send(`Sync data for ${uid} in server ${server_id} is OK`)
 })
 
 export default r

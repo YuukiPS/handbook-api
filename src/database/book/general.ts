@@ -18,10 +18,128 @@ import config from "@UT/config"
 import { LANG_SR } from "./star-rail"
 import { LANG_GI } from "./genshin-impact"
 import Discord from "@SV/discord"
+import Yuuki from "@DB/book/yuuki"
 
 const log = new Logger("General")
 
 export const _ = {
+	getItem: async function (
+		id: number,
+		type: number,
+		game?: number,
+		lang: string = "EN",
+		filter: Partial<ItemData> = {}
+	): Promise<any> {
+		await DBMongo.isConnected()
+		const collection = DBMongo.getCollection<ItemData>("book")
+		if (!collection) {
+			log.errorNoStack("api_db_nofound_collection_book")
+			return false
+		}
+
+		var setlang = lang.toUpperCase()
+
+		// 1) build your match stage
+		const match: any = { id, type, ...filter }
+		if (game !== undefined) {
+			match.game = game
+		}
+
+		// 2) assemble pipeline
+		const pipeline: any[] = [
+			{ $match: match },
+			{
+				$addFields: {
+					name: {
+						$cond: {
+							if: { $ifNull: [`$name.${setlang}`, false] },
+							then: `$name.${setlang}`,
+							else: {
+								$cond: {
+									if: { $ifNull: ["$name.EN", false] },
+									then: "$name.EN",
+									else: {
+										$let: {
+											vars: {
+												firstKeyValue: {
+													$arrayElemAt: [{ $objectToArray: "$name" }, 0]
+												}
+											},
+											in: "$$firstKeyValue.v"
+										}
+									}
+								}
+							}
+						}
+					},
+					desc: {
+						$cond: {
+							if: { $ifNull: [`$desc.${setlang}`, false] },
+							then: `$desc.${setlang}`,
+							else: {
+								$cond: {
+									if: { $ifNull: ["$desc.EN", false] },
+									then: "$desc.EN",
+									else: {
+										$let: {
+											vars: {
+												firstKeyValue: {
+													$arrayElemAt: [{ $objectToArray: "$desc" }, 0]
+												}
+											},
+											in: "$$firstKeyValue.v"
+										}
+									}
+								}
+							}
+						}
+					},
+					desc2: {
+						$cond: {
+							if: { $ifNull: [`$desc2.${setlang}`, false] },
+							then: `$desc2.${setlang}`,
+							else: {
+								$cond: {
+									if: { $ifNull: ["$desc2.EN", false] },
+									then: "$desc2.EN",
+									else: {
+										$let: {
+											vars: {
+												firstKeyValue: {
+													$arrayElemAt: [{ $objectToArray: "$desc2" }, 0]
+												}
+											},
+											in: "$$firstKeyValue.v"
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			{ $project: { _id: 0 } },
+			{ $limit: 1 }
+		]
+
+		// 3) run it and grab the first result
+		const [item] = await collection.aggregate(pipeline).toArray()
+
+		// 4) return a uniform “not found” or the item
+		if (!item) {
+			return {
+				message: "api_db_book_notfound",
+				retcode: -1,
+				data: null
+			}
+		}
+
+		return {
+			message: "api_db_book_get_success",
+			retcode: 0,
+			data: item
+		}
+	},
 	findItem: async function (options?: {
 		search?: string
 		type?: number
@@ -218,124 +336,7 @@ export const _ = {
 
 		const existingDoc = await collection.findOne(query)
 		return existingDoc !== null
-	},
-	getItem: async function (
-		id: number,
-		type: number,
-		game?: number,
-		lang: string = "EN",
-		filter: Partial<ItemData> = {}
-	): Promise<any> {
-		await DBMongo.isConnected()
-		const collection = DBMongo.getCollection<ItemData>("book")
-		if (!collection) {
-			log.errorNoStack("api_db_nofound_collection_book")
-			return false
-		}
-
-		var setlang = lang.toUpperCase()
-
-		// 1) build your match stage
-		const match: any = { id, type, ...filter }
-		if (game !== undefined) {
-			match.game = game
-		}
-
-		// 2) assemble pipeline
-		const pipeline: any[] = [
-			{ $match: match },
-			{
-				$addFields: {
-					name: {
-						$cond: {
-							if: { $ifNull: [`$name.${setlang}`, false] },
-							then: `$name.${setlang}`,
-							else: {
-								$cond: {
-									if: { $ifNull: ["$name.EN", false] },
-									then: "$name.EN",
-									else: {
-										$let: {
-											vars: {
-												firstKeyValue: {
-													$arrayElemAt: [{ $objectToArray: "$name" }, 0]
-												}
-											},
-											in: "$$firstKeyValue.v"
-										}
-									}
-								}
-							}
-						}
-					},
-					desc: {
-						$cond: {
-							if: { $ifNull: [`$desc.${setlang}`, false] },
-							then: `$desc.${setlang}`,
-							else: {
-								$cond: {
-									if: { $ifNull: ["$desc.EN", false] },
-									then: "$desc.EN",
-									else: {
-										$let: {
-											vars: {
-												firstKeyValue: {
-													$arrayElemAt: [{ $objectToArray: "$desc" }, 0]
-												}
-											},
-											in: "$$firstKeyValue.v"
-										}
-									}
-								}
-							}
-						}
-					},
-					desc2: {
-						$cond: {
-							if: { $ifNull: [`$desc2.${setlang}`, false] },
-							then: `$desc2.${setlang}`,
-							else: {
-								$cond: {
-									if: { $ifNull: ["$desc2.EN", false] },
-									then: "$desc2.EN",
-									else: {
-										$let: {
-											vars: {
-												firstKeyValue: {
-													$arrayElemAt: [{ $objectToArray: "$desc2" }, 0]
-												}
-											},
-											in: "$$firstKeyValue.v"
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			},
-			{ $project: { _id: 0 } },
-			{ $limit: 1 }
-		]
-
-		// 3) run it and grab the first result
-		const [item] = await collection.aggregate(pipeline).toArray()
-
-		// 4) return a uniform “not found” or the item
-		if (!item) {
-			return {
-				message: "api_db_book_notfound",
-				retcode: -1,
-				data: null
-			}
-		}
-
-		return {
-			message: "api_db_book_get_success",
-			retcode: 0,
-			data: item
-		}
-	},
+	},	
 	/**
 	 * Add or update a document in `book`, matching on {id, type, …extraFilter}.
 	 * obj must include at least id/type, and any other fields are stored in the doc.
@@ -373,7 +374,7 @@ export const _ = {
 		if (!existing) {
 			if (obj.id == 0) {
 				// set id to 0 for auto increment
-				obj.id = await this.getCount("book")
+				obj.id = await Yuuki.getCount("book")
 			}
 
 			await collection.insertOne(obj as OptionalUnlessRequiredId<T>)
@@ -416,7 +417,7 @@ export const _ = {
 		if (!existing) {
 			if (obj.id == 0) {
 				// set id to 0 for auto increment
-				obj.id = await this.getCount("documentation")
+				obj.id = await Yuuki.getCount("documentation")
 			}
 
 			await collection.insertOne(obj as OptionalUnlessRequiredId<T>)
@@ -640,7 +641,7 @@ export const _ = {
 
 			log.info(`Latest commit for ${saveDB} > ${latestCommit.id} (${latestCommit.committed_date})`)
 
-			var getLast = await this.getProp(saveDB)
+			var getLast = await Yuuki.getProp(saveDB)
 			if (getLast.data != null) {
 				if (latestCommit.id !== getLast.data.value || tesMode) {
 					log.info("New update is available!")
@@ -708,14 +709,14 @@ export const _ = {
 					} else {
 						log.warn(`skip notif update, no token is found`)
 					}
-					this.updateProp(saveDB, latestCommit.id, "update")
+					Yuuki.updateProp(saveDB, latestCommit.id, "update")
 					return true
 				} else {
 					log.errorNoStack("No updates.")
 				}
 			} else {
 				log.warn(`No data ${saveDB} found in database.`)
-				this.updateProp(saveDB, latestCommit.id, "update") // try save it
+				Yuuki.updateProp(saveDB, latestCommit.id, "update") // try save it
 				return true
 			}
 		} catch (error: any) {
@@ -723,113 +724,7 @@ export const _ = {
 		}
 
 		return false
-	},
-	updateProp: async function (field: string, value: string, reason: string = "none"): Promise<PropRsp> {
-		if (isEmpty(field)) {
-			return {
-				message: "api_db_prop_notoken",
-				retcode: -2,
-				data: null
-			}
-		}
-
-		try {
-			await DBMongo.isConnected()
-
-			const cProp = DBMongo.getCollection<Prop>("prop")
-			if (!cProp) {
-				return {
-					message: `api_db_nofound_collection`,
-					retcode: statusCodes.error.CANCEL,
-					data: null
-				}
-			}
-
-			// Update the account based on the token and retrieve the updated document
-			const updateResult = await cProp.findOneAndUpdate(
-				{ _id: field },
-				{
-					$set: {
-						value,
-						time: getTimeV2(true),
-						reason
-					}
-				},
-				{
-					upsert: true, // Insert a new document if not found
-					returnDocument: "after" // Return the updated document
-				}
-			)
-			if (updateResult) {
-				return {
-					message: "api_db_prop_update_success",
-					retcode: 0,
-					data: updateResult
-				}
-			} else {
-				log.error({ name: "api_db_prop_update_failed", error: updateResult })
-				return {
-					message: "api_db_prop_update_failed",
-					retcode: -1,
-					data: null
-				}
-			}
-		} catch (error) {
-			log.error(error)
-			return {
-				message: "api_db_prop_failed1",
-				retcode: -2,
-				data: null
-			}
-		}
-	},
-	getCount: async function (field: string): Promise<number> {
-		var count = 1
-		var countData = await this.getProp(field)
-		if (countData.data) {
-			count = parseInt(countData.data.value) + 1
-		}
-		await this.updateProp(field, count.toString(), "count")
-		return count
-	},
-	getProp: async function (field: string): Promise<PropRsp> {
-		try {
-			await DBMongo.isConnected()
-
-			let cProp = DBMongo.getCollection<Prop>("prop")
-
-			// After the loop, check if the collection was successfully retrieved
-			if (!cProp) {
-				return {
-					message: `api_db_nofound_collection`,
-					retcode: statusCodes.error.CANCEL,
-					data: null
-				}
-			}
-
-			let d = await cProp.findOne({ _id: field })
-			if (d) {
-				return {
-					message: `api_db_prop_${field}_ok`,
-					retcode: 0,
-					data: d
-				}
-			} else {
-				return {
-					message: `api_db_prop_${field}_failed`,
-					retcode: -1,
-					data: null
-				}
-			}
-		} catch (error) {
-			log.error(error)
-			return {
-				message: "api_db_prop_failed1",
-				retcode: -2,
-				data: null
-			}
-		}
-	}
+	}	
 }
 
 export default _

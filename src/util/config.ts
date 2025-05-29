@@ -27,11 +27,10 @@ export const _ = acfg({
 			}
 		}
 	},
+	// foe get private data like password server
 	auth: {
 		api: "https://ps.yuuki.me", // url for auth
-		uid: "110000000", // uid for auth
-		code: "0000", // code for auth, TODO: maybe we use token instead
-		useApi: true // if false use db localhost ignore auth
+		token: "1234",
 	},
 	ai: {
 		server: {

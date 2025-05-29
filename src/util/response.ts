@@ -19,7 +19,97 @@ export interface GitLabCommit {
 	web_url: string
 }
 
-// Prop
+// SRTools
+export interface SRToolsReq {
+	avatars: Record<string, Avatar>
+	relics: Relic[]
+	lightcones: Lightcone[]
+	battle_config: BattleConfig
+}
+interface Avatar {
+	avatar_id: number
+	data: AvatarData
+	level: number
+	promotion: number
+	sp_max: number
+	sp_value: number
+	techniques: number[]
+	owner_uid: number
+}
+interface AvatarData {
+	rank: number
+	skills: Record<string, number>
+}
+interface Relic {
+	equip_avatar: number
+	internal_uid: number
+	level: number
+	main_affix_id: number
+	relic_id: number
+	relic_set_id: number
+	sub_affixes: SubAffix[]
+}
+interface SubAffix {
+	count: number
+	step: number
+	sub_affix_id: number
+}
+interface Lightcone {
+	equip_avatar: number
+	internal_uid: number
+	item_id: number
+	level: number
+	promotion: number
+	rank: number
+}
+interface BattleConfig {
+	battle_type: string
+	blessings: any[]
+	custom_stats: any[]
+	cycle_count: number
+	stage_id: number
+	path_resonance_id: number
+	monsters: Monster[][]
+}
+interface Monster {
+	amount: number
+	level: number
+	monster_id: number
+}
+
+// Yuuki Manager Account
+export interface PrivateServerInfo {
+	name: string
+	id: string
+	api: {
+		url: string
+		type: number // 0=off (api version command) normal we do not use this
+		password: string // password for public commands
+		passwrod_private: string // password for private commands aka super admin
+	}
+	game: number
+	engine: number
+}
+export interface CommonRsp {
+	message: string
+	retcode: number
+}
+export interface CommonDataRsp<T> {
+	message: string
+	retcode: number
+	data?: T | null | undefined
+}
+export interface AccountDB extends Document {
+	_id: string
+	tokenAPI: string // code cmd,
+}
+export interface PlayerBasic {
+	uid: number // player uid
+	id_server?: string
+	accountId: string // accoun uid
+	nickname: string // name or nickname
+	signature: string // Commenters or can be used for status
+}
 export interface Prop {
 	_id: string
 	value: string
