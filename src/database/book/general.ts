@@ -380,7 +380,7 @@ export const _ = {
 			await collection.insertOne(obj as OptionalUnlessRequiredId<T>)
 			return true
 		} else {
-			log.warn("itemAdd: already exists", { query })
+			log.debug("itemAdd: already exists", { query })
 			return false
 		}
 	},

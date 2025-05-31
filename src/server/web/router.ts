@@ -101,6 +101,19 @@ r.all("/build/sr", async (req: Request, res: Response) => {
 	})
 	res.json(tes)
 })
+r.all("/sync/sr", async (req: Request, res: Response) => {
+	var b = req.body
+	var p = req.params
+	var q = req.query
+	log.warn({
+		name: "export_sr",
+		query: q,
+		body: b,
+		params: p,
+		header: req.headers,
+		cookie: req.cookies
+	})
+})
 r.all("/srtool/:id", async (req: Request, res: Response) => {
 	var b = req.body
 	var p = req.params
@@ -163,15 +176,18 @@ r.all("/srtool/:id", async (req: Request, res: Response) => {
 				var avatar = dataSync.avatars
 				if (!isEmpty(avatar)) {
 					for (const a of Object.values(avatar)) {
+						const filteredSkills = Object.fromEntries(
+							Object.entries(a.data.skills || {}).filter(([_, v]) => v !== 0 && v !== 1)
+						)
 						const obj: BuildData = {
 							owner: parseInt(dataPlayer.accountId),
-							title: `Build for ${dataPlayer.uid} in ${server_id}`,
+							title: `build_default_${dataPlayer.uid}`,
 							avatar: {
 								id: a.avatar_id,
 								level: a.level,
 								rank: a.data.rank, // Promotion is the same as rank in SR?
 								promotion: a.promotion,
-								skills: a.data.skills
+								skills: filteredSkills
 							},
 							vote: 0,
 							time: getTimeV2(true),

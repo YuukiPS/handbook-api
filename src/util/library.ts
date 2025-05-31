@@ -320,7 +320,7 @@ export function createEnum(keys: string[], nameFunc: string): string {
 	const entries = keys.map((k, i) => `  ${k} = ${i}`).join(",\n")
 
 	// pick a sensible default fallback (first key)
-	const defaultKey = keys[0]
+	//const defaultKey = keys[0]
 
 	// name of the reverse lookup fn
 	const numberFuncName = `${nameFunc}Number`
@@ -335,7 +335,7 @@ export function createEnum(keys: string[], nameFunc: string): string {
   }
   
   function ${numberFuncName}(id: number): string {
-	return ${enumName}[id] ?? "${defaultKey}";
+	return ${enumName}[id] ?? "Unknown";
   }
   `.trim()
 }

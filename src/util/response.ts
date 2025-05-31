@@ -38,7 +38,7 @@ interface Avatar {
 }
 interface AvatarData {
 	rank: number
-	skills: Record<string, number>
+	skills: Record<number, number>
 }
 interface Relic {
 	equip_avatar: number
@@ -133,6 +133,9 @@ interface StageConfigData {
 interface KeyStringNumber {
 	[key: string]: number
 }
+interface KeyNumber {
+	[key: number]: number
+}
 
 // Class (for mapping)
 export class ClassAvatarExcelGI {
@@ -147,6 +150,26 @@ export class ClassAvatarExcelSR {
 		Object.assign(this, data)
 	}
 }
+export class ClassAvatarExcelBA {
+	// testing reduced memory usage
+	static fields = [
+		"Id",
+		"Name",
+		"PersonalName",
+		"Icon",
+		"ProfileIntroduction",
+		"WeaponType",
+		"SquadType",
+		"BulletType",
+		"StarGrade"
+	] as const;
+
+	[key: string]: AvatarExcelBA
+	constructor(data: Record<string, AvatarExcelBA>) {
+		Object.assign(this, data)
+	}
+}
+
 export class ClassAvatarPropertyExcelSR {
 	[key: string]: AvatarPropertyExcelSR
 	constructor(data: Record<string, AvatarPropertyExcelSR>) {
@@ -180,6 +203,12 @@ export class ClassItemExcelGI {
 export class ClassItemExcelSR {
 	[key: string]: ItemExcelSR
 	constructor(data: Record<string, ItemExcelSR>) {
+		Object.assign(this, data)
+	}
+}
+export class ClassItemExcelBA {
+	[key: string]: ItemExcelBA
+	constructor(data: Record<string, ItemExcelBA>) {
 		Object.assign(this, data)
 	}
 }
@@ -457,6 +486,17 @@ export interface AvatarExcelSR {
 	DamageType: string
 	AvatarVOTag: string
 }
+export interface AvatarExcelBA {
+	Id: number
+	Name: string
+	PersonalName: string
+	Icon: string
+	ProfileIntroduction: string
+	WeaponType: string
+	SquadType: string
+	BulletType: string
+	StarGrade: number
+}
 export interface AvatarPropertyExcelSR {
 	PropertyType: string
 	PropertyName: HashObject
@@ -544,6 +584,15 @@ export interface ItemExcelSR {
 	ItemBGDesc: HashObject
 	ItemDesc: HashObject // show in ItemConfigEquipment
 }
+export interface ItemExcelBA {
+	Id: number
+	Name: string
+	Icon: string
+	Desc: string
+	Category: string
+	Rarity: string
+	Quality: number
+}
 
 // In Datebase
 export interface BookRsp {
@@ -566,7 +615,7 @@ export enum TypeItem {
 	Plane = 11,
 	Stage = 12
 }
-export function getAllTypeItem(): String[] {
+export function getAllTypeItem(): string[] {
 	return Object.keys(TypeItem)
 		.map((key) => TypeItem[key as keyof typeof TypeItem])
 		.filter((value) => typeof value === "string") as string[]
@@ -734,7 +783,7 @@ export interface BuildAvatarData {
 	level: number
 	rank: number // Eidolon
 	promotion: number // This changes based on level
-	skills?: KeyStringNumber // Trace
+	skills?: KeyNumber // Trace
 	buff?: number[] // or Techniques
 }
 export interface BuildEquipmentData {
@@ -770,7 +819,7 @@ export enum TypeDocumentation {
 	Guide = 3,
 	Blog = 4
 }
-export function getAllTypeDocumentation(): String[] {
+export function getAllTypeDocumentation(): string[] {
 	return Object.keys(TypeDocumentation)
 		.map((key) => TypeDocumentation[key as keyof typeof TypeDocumentation])
 		.filter((value) => typeof value === "string") as string[]
@@ -785,7 +834,7 @@ export enum GameEngine {
 	LC = 5,
 	BP = 6 // blue archive aka BaPs
 }
-export function getAllGameEngine(): String[] {
+export function getAllGameEngine(): string[] {
 	return Object.keys(GameEngine)
 		.map((key) => GameEngine[key as keyof typeof GameEngine])
 		.filter((value) => typeof value === "string") as string[]

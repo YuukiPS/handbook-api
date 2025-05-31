@@ -30,7 +30,7 @@ export default async function run(message: Message, client: Client) {
 	log.info(`Received message from ${username}#${userId} in ${channelName}#${channelId}: "${content}"`)
 
 	// AI interaction in designated channel
-	if (config.bot.discord.ai.channel.includes(channelId) && content.length > 0) {
+	if (config.bot.discord.ai.channel.includes(channelId) && content.length > 0 && !content.startsWith("!")) {
 		
 		const replyMessage = await message.reply(
 			"Wait a moment, I'm still learning to talk, please be patient with me."
