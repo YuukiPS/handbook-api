@@ -9,16 +9,16 @@ import {
 	isValidUrl,
 	readJsonFileCached
 } from "@UT/library"
-import { BookRsp, DocumentationData, GitLabCommit, ItemData, Prop, PropRsp, TypeDocumentation } from "@UT/response"
+import { BookRsp, ArticleData, GitLabCommit, ItemData, Prop, PropRsp, TypeArticle } from "@UT/response"
 import axios from "axios"
 import fs from "fs/promises"
 import DBMongo from "@DB/client/mongo"
 import { Filter, OptionalUnlessRequiredId } from "mongodb"
 import config from "@UT/config"
-import { LANG_SR } from "./star-rail"
-import { LANG_GI } from "./genshin-impact"
+import { LANG_SR } from "../book/star-rail"
+import { LANG_GI } from "../book/genshin-impact"
 import Discord from "@SV/discord"
-import Yuuki from "@DB/book/yuuki"
+import Yuuki from "@DB/general/yuuki"
 
 const log = new Logger("General")
 
@@ -186,7 +186,10 @@ export const _ = {
 			if (!isEmpty(type)) query.type = type
 			if (!isEmpty(game)) query.game = game
 
-			log.debug(`query findItem: ${limit} limit > `, query)
+			//log.info(`query findItem: ${limit} limit > `, query)
+			log.info(
+				`findItem: ${search} | type: ${type} | game: ${game} | lang: ${lang} | limit: ${limit} | page: ${page}`
+			)
 
 			// compute skip
 			const skip = (page - 1) * limit
@@ -336,7 +339,7 @@ export const _ = {
 
 		const existingDoc = await collection.findOne(query)
 		return existingDoc !== null
-	},	
+	},
 	/**
 	 * Add or update a document in `book`, matching on {id, type, …extraFilter}.
 	 * obj must include at least id/type, and any other fields are stored in the doc.
@@ -384,14 +387,14 @@ export const _ = {
 			return false
 		}
 	},
-	addDoc: async function <T extends DocumentationData>(
+	addArticle: async function <T extends ArticleData>(
 		obj: T,
 		rebuild: boolean = false,
 		replace: boolean = false,
 		extraFilter: Omit<Partial<T>, "id"> = {} as Omit<Partial<T>, "id">
 	): Promise<boolean> {
 		await DBMongo.isConnected()
-		const collection = DBMongo.getCollection<T>("documentation")
+		const collection = DBMongo.getCollection<T>("article")
 		if (!collection) {
 			log.errorNoStack("api_db_nofound_collection_book")
 			return false
@@ -417,7 +420,7 @@ export const _ = {
 		if (!existing) {
 			if (obj.id == 0) {
 				// set id to 0 for auto increment
-				obj.id = await Yuuki.getCount("documentation")
+				obj.id = await Yuuki.getCount("article")
 			}
 
 			await collection.insertOne(obj as OptionalUnlessRequiredId<T>)
@@ -429,11 +432,11 @@ export const _ = {
 	},
 	findTopKSimilar: async function (
 		queryEmbedding: number[],
-		type: TypeDocumentation,
-		filter: Partial<DocumentationData> = {},
+		type: TypeArticle,
+		filter: Partial<ArticleData> = {},
 		k = 5
-	): Promise<Omit<DocumentationData, "embedding">[]> {
-		const collection = DBMongo.getCollection<DocumentationData>("documentation")
+	): Promise<Omit<ArticleData, "embedding">[]> {
+		const collection = DBMongo.getCollection<ArticleData>("article")
 		if (!collection) {
 			throw new Error("Collection not found")
 		}
@@ -482,7 +485,134 @@ export const _ = {
 			{ $project: { embedding: 0, score: 0 } }
 		]
 
-		return collection.aggregate<Omit<DocumentationData, "embedding">>(pipeline).toArray()
+		return collection.aggregate<Omit<ArticleData, "embedding">>(pipeline).toArray()
+	},
+	/**
+	 * List all questions from the database with owner information populated
+	 *
+	 * @param limit - Maximum number of questions to return (default: 10)
+	 * @param page - Page number for pagination (default: 1)
+	 * @param includeOwnerData - Whether to populate owner data from accounts (default: true)
+	 */
+	listAsk: async function (
+		limit: number = 10,
+		page: number = 1,
+		includeOwnerData: boolean = true
+	): Promise<{
+		message: string
+		retcode: number
+		data: any[] | null
+		total?: number
+	}> {
+		try {
+			await DBMongo.isConnected()
+			const collection = DBMongo.getCollection<ArticleData>("article")
+			if (!collection) {
+				log.errorNoStack("api_db_nofound_collection_article")
+				return {
+					message: "api_db_nofound_collection_article",
+					retcode: -1,
+					data: null
+				}
+			}
+
+			// Calculate skip for pagination
+			const skip = (page - 1) * limit
+
+			// Build query to find only questions
+			const query = { type: TypeArticle.Question }
+
+			// Get total count for pagination info
+			const total = await collection.countDocuments(query)
+
+			// Build aggregation pipeline
+			const pipeline: any[] = [
+				{ $match: query },
+				{ $sort: { time: -1 } }, // Sort by creation time, newest first
+				{ $skip: skip },
+				{ $limit: limit },
+				{
+					$project: {
+						embedding: 0 // Exclude embedding field to reduce response size
+					}
+				}
+			] // If includeOwnerData is true, add lookup stage to join with accounts collection
+			if (includeOwnerData) {
+				pipeline.push(
+					{
+						$lookup: {
+							from: "accounts",
+							let: { ownerId: "$owner" },
+							pipeline: [
+								{
+									$match: {
+										$expr: {
+											$or: [
+												// Try direct match first (if both are same type)
+												{ $eq: ["$_id", "$$ownerId"] },
+												// Try string conversion (if owner is number, _id is string)
+												{ $eq: ["$_id", { $toString: "$$ownerId" }] },
+												// Try number conversion (if owner is string, _id is number)
+												{ $eq: ["$_id", { $toInt: "$$ownerId" }] }
+											]
+										}
+									}
+								}
+							],
+							as: "ownerData"
+						}
+					},
+					{
+						$addFields: {
+							owner: {
+								$cond: {
+									if: { $eq: [{ $size: "$ownerData" }, 0] },
+									// No account found - create fallback owner object
+									then: {
+										uid: "$owner",
+										username: { $concat: ["User1_", { $toString: "$owner" }] },
+										avatar: null
+									}, // Account found - use account data
+									else: {
+										uid: "$owner",
+										username: {
+											$ifNull: [
+												{ $arrayElemAt: ["$ownerData.username", 0] },
+												{ $concat: ["User_", { $toString: "$owner" }] }
+											]
+										},
+										avatar: null // Avatar field not available in AccountDB
+									}
+								}
+							}
+						}
+					},
+					{
+						$project: {
+							ownerData: 0, // Remove the temporary ownerData field
+							_id: 0, // Exclude MongoDB’s default _id field
+							type: 0, // Exclude type field if not needed
+						}
+					}
+				)
+			}
+
+			const questions = await collection.aggregate(pipeline).toArray()
+
+			return {
+				message: "api_db_article_list_success",
+				retcode: 0,
+				data: questions,
+				total
+			}
+		} catch (error) {
+			log.error("listAsk error:", error)
+			return {
+				message: "api_db_article_list_error",
+				retcode: -1,
+				data: null
+			}
+		}
 	},
 	addMultiLangNamesAsObject: function (
 		hash: string,
@@ -555,14 +685,16 @@ export const _ = {
 	): Promise<string> {
 		if (!sourceUrlorLocal) return ""
 
-		if (await fileExists(localFile) && !replace) {
+		if ((await fileExists(localFile)) && !replace) {
 			log.debug(`File1 ${localFile} already exists`)
 			// TODO: check if real valid file use md5 between local and remote
 			return urlPublic
 		}
 
 		const isRemote = isValidUrl(sourceUrlorLocal)
-		log.info(`isRemote: ${isRemote} for ${sourceUrlorLocal} > ${localFile} > ${urlPublic} | replace: ${replace} | fallback: ${fallbackUrl}`)
+		log.info(
+			`isRemote: ${isRemote} for ${sourceUrlorLocal} > ${localFile} > ${urlPublic} | replace: ${replace} | fallback: ${fallbackUrl}`
+		)
 
 		if (isRemote) {
 			log.info(`Downloading ${sourceUrlorLocal} to ${localFile}`)
@@ -724,7 +856,7 @@ export const _ = {
 		}
 
 		return false
-	}	
+	}
 }
 
 export default _
