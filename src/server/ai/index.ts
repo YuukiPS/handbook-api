@@ -7,7 +7,7 @@ import {
 	getTypeGameEngine,
 	getTypeItem,
 	QuestionData,
-	TypeDocumentation
+	TypeArticle,
 } from "@UT/response"
 import config, { GetAiServer } from "@UT/config"
 import { detectLang, isEmpty, LanguageGame } from "@UT/library"
@@ -23,7 +23,7 @@ import {
 	ChatCompletionTool
 } from "openai/resources/chat/completions"
 // database
-import General from "@DB/book/general"
+import General from "@DB/general/api"
 
 const log = new Logger(`AI`)
 
@@ -343,7 +343,7 @@ class AI {
 
 			const top = (await General.findTopKSimilar(
 				embed,
-				TypeDocumentation.Question,
+				TypeArticle.Question,
 				{},
 				this.cfg.maxMatch
 			)) as QuestionData[]
@@ -364,7 +364,7 @@ class AI {
 			}
 			const top = (await General.findTopKSimilar(
 				embed,
-				TypeDocumentation.Command,
+				TypeArticle.Command,
 				searchParams,
 				this.cfg.maxMatch
 			)) as CommandData[]

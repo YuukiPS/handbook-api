@@ -35,7 +35,7 @@ import path from "path"
 import { Document, Sort } from "mongodb"
 // datebase
 import DBMongo from "@DB/client/mongo"
-import General from "@DB/book/general"
+import General from "@DB/general/api"
 import { domainPublic } from "@UT/config"
 
 const nameGame = "star-rail"
@@ -578,7 +578,12 @@ class SR {
 				desc: {},
 				desc2: {},
 				icon: "",
-				grup
+				grup,
+				stats: {
+					Property: getPropType, // if PropertyType not Delta then its percent
+					BaseValue: main.BaseValue.Value, // base value
+					LevelAdd: main.LevelAdd.Value, // level add value
+				}
 			}
 			if (!fastcheck && !rebuild && (await General.itemExists(obj.id, obj.type), { grup })) {
 				log.info(`RelicMain already exists, skipping ${obj.id} (${obj.type})`)
@@ -642,7 +647,13 @@ class SR {
 				desc: {},
 				desc2: {},
 				icon: "",
-				grup
+				grup: grup,
+				stats: {
+					Property: getPropType, // if PropertyType not Delta then its percent
+					BaseValue: sub.BaseValue.Value, // base value
+					StepValue: sub.StepValue.Value, //step so base + step * (maxStep is 2 or StepNum)
+					StepNum: sub.StepNum, // step number default
+				}
 			}
 
 			if (!fastcheck && !rebuild && (await General.itemExists(obj.id, obj.type), { grup })) {
@@ -1264,7 +1275,7 @@ class SR {
 						const parts = data.ItemIconPath.split("/")
 						const folderName = parts[parts.length - 2].replace("ItemIcon", "itemfigures")
 						//console.log("folderName", parts)
-						
+
 						const fileNameWithExtension = parts[parts.length - 1]
 						const fileName = fileNameWithExtension.replace(".png", "") // "4006_2"
 

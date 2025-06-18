@@ -344,6 +344,7 @@ export interface ReliquaryExcelGI {
 	mainPropDepotId: number
 	appendPropDepotId: number
 	rankLevel: number
+	appendPropNum: number
 }
 export interface RelicMainAffixExcelSR {
 	GroupID: number
@@ -711,12 +712,25 @@ export interface ItemArtifactMain extends ItemData {
 	//type: 7
 	// detail
 	grup?: number
+	// basic stats
+	stats?: {
+		Property: string
+		BaseValue: number
+		LevelAdd: number
+	}
 }
 export interface ItemArtifactSub extends ItemData {
 	// always from type 8 for artifact sub
 	//type: 8
 	// detail
 	grup?: number
+	// basic stats
+	stats?: {
+		Property: string
+		BaseValue: number
+		StepValue: number
+		StepNum: number
+	}
 }
 export interface ItemArtifactConfig extends ItemData {
 	// always from type 9 for artifact config
@@ -726,6 +740,7 @@ export interface ItemArtifactConfig extends ItemData {
 	sub?: number
 	starType?: number
 	equipType?: number
+	appendPropNum?: number // Gear: 0-4 idk
 }
 export interface ItemQuest extends ItemData {
 	// always from type 10 for quest
@@ -811,17 +826,17 @@ export interface BuildRsp {
 	data: BuildData[] | null
 }
 
-// Documentation
-export enum TypeDocumentation {
+// Article
+export enum TypeArticle {
 	None = 0,
 	Question = 1,
 	Command = 2,
 	Guide = 3,
 	Blog = 4
 }
-export function getAllTypeDocumentation(): string[] {
-	return Object.keys(TypeDocumentation)
-		.map((key) => TypeDocumentation[key as keyof typeof TypeDocumentation])
+export function getAllTypeArticle(): string[] {
+	return Object.keys(TypeArticle)
+		.map((key) => TypeArticle[key as keyof typeof TypeArticle])
 		.filter((value) => typeof value === "string") as string[]
 }
 // Note: CP/LC now its same, GIO/VIA now its same
@@ -845,25 +860,54 @@ export function getTypeGameEngine(name: string): number {
 export function getStringTypeGameEngine(value: number): string {
 	return (GameEngine as any)[value] ?? "None"
 }
-export interface DocumentationData {
-	id: number
-	owner: number // account id (Yuuki account)
-	time: number
-	update: number
-	vote: number
-	view: number // view count (may be useful for frequently searched questions)
-	tag: string[]
-	type: TypeDocumentation
-	language: string
-	embedding: number[] // https://platform.openai.com/docs/models/embeddings
+export interface OwnerData {
+	uid: number // uid account (Yuuki account)
+	username: string // username account (Yuuki account)
+	avatar?: string // todo: support avatar image
 }
-export interface QuestionData extends DocumentationData {
+export interface ArticleData {
+	id: number // id article (must be unique)
+	owner: number | OwnerData // server side use number and client side use OwnerData
+	time: number // article create use timestemp
+	update: number // article update use timestemp
+	vote: number // vote number (like reddit)
+	view: number // view count for how many times this article has been viewed
+	tag: string[] // like keywords, or tags
+	type: TypeArticle
+	language: string // language article use, like en, id, th, etc
+	embedding?: number[] // https://platform.openai.com/docs/models/embeddings (not use in meta blog)
+}
+export interface AnswerData {
+	id: number // id alternative answer (should be unique)
+	answer: string // use markdown only
+	embedding?: number[] // ai embedding for alternative answer (not use in meta blog)
+	vote: number // vote for alternative answer
+	owner: number | OwnerData // server side use number and client side use OwnerData
+	time: number // alternative answer create use timestemp
+	update: number // alternative answer update use timestemp
+}
+export interface QuestionData extends ArticleData {
 	question: string
-	answer: string
+	//answer: old
+	answerId: number // best answer id (if accepted)
+	closed: boolean // if true this question is closed, no more answer can be added
+	closedReason?: string // reason why this question is closed, if empty then no reason
+	resolved: boolean // if true this question is resolved, no more answer can be added
+	answer?: AnswerData[] // list answer for this question, if empty then no answer
 }
-export interface CommandData extends DocumentationData {
+export interface CommandData extends ArticleData {
 	command: string
 	description: string
 	usage: string
 	typeEngine: GameEngine // use use GameEngine enum?
+}
+export interface BlogData extends ArticleData {
+	title: string
+	slug?: string // slug for url, if not set use title or id
+	content: string // markdown content or html content (in meta dont add it)
+	shortContent?: string // short content for blog, if not set use first 100 char from content
+	thumbnail?: string // thumbnail image for blog
+	description?: string // description for blog, if not set use first 100 char from content
+	comment: boolean // if true allow comment on blog
+	index: boolean // if true index this blog in search engine
 }

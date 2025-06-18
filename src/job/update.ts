@@ -59,7 +59,7 @@ class Update {
 		// BA - https://schaledb.com - TODO: use real dump or raw github (https://github.com/feilongproject/ba-data)
 		await BOOK_GI.Update(skip_update, rebuild, dont_build, replace)
 		await BOOK_SR.Update(skip_update, rebuild, dont_build, replace)
-		await BOOK_BA.Update(skip_update, rebuild, dont_build, replace)
+		//await BOOK_BA.Update(skip_update, rebuild, dont_build, replace)
 	}
 }
 

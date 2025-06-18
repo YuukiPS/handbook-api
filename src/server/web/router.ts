@@ -4,8 +4,8 @@ import Logger from "@UT/logger"
 import { getTimeV2, isEmpty } from "@UT/library"
 
 import SRTool from "@DB/book/star-rail"
-import General from "@DB/book/general"
-import Yuuki from "@DB/book/yuuki"
+import General from "@DB/general/api"
+import Yuuki from "@DB/general/yuuki"
 import { AccountDB, BuildData, SRToolsReq } from "@UT/response"
 
 const r = express.Router()
@@ -31,6 +31,14 @@ r.all("/ai/ask", async (req: Request, res: Response) => {
 	res.send(result)
 })
 
+r.all("/ask/list", async (req: Request, res: Response) => {
+	const { page, limit } = req.query
+	const pageNum = parseInt(page as string) || 1
+	const limitNum = parseInt(limit as string) || 10
+	const result = await General.listAsk(limitNum, pageNum)
+	return res.json(result)
+})
+
 r.all("/item/:lang/:game/:type/:id", async (req: Request, res: Response) => {
 	const { id, game, type, lang } = req.params
 
@@ -53,7 +61,7 @@ r.all("/item", async (req: Request, res: Response) => {
 	const pageNum = parseInt(page as string) || 1
 	const gameNum = parseInt(game as string) || 0
 	const typeNum = parseInt(type as string) || 0
-	const langString = (lang as string) || "en"
+	const langString = (lang as string) || (req.query.language as string) || "en"
 
 	// try to parse limit; NaN means “not provided”
 	const rawLimit = parseInt(req.query.limit as string)
@@ -76,13 +84,11 @@ r.all("/item", async (req: Request, res: Response) => {
 })
 
 // SR for Relic
-/*
 r.all("/gen/relic", async (req: Request, res: Response) => {
 	const { cmd } = req.query
 	var tes = await SRTool.GenRelic(cmd as string)
 	res.json(tes)
 })
-*/
 r.all("/build/sr", async (req: Request, res: Response) => {
 	var idAvatar = req.query.avatar as string
 	if (idAvatar == "all") idAvatar = "0"

@@ -2,7 +2,7 @@ import Logger from "@UT/logger"
 import { Command } from "./Interface"
 import * as fs from "fs"
 import SRTool, { FOLDER_SR } from "@DB/book/star-rail"
-import General from "@DB/book/general"
+import General from "@DB/general/api"
 import { getTimeV2, readJsonFileAsync } from "@UT/library"
 import { BuildData } from "@UT/response"
 

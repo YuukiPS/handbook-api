@@ -32,7 +32,7 @@ import ExcelManager from "@UT/excel"
 // thrid party
 import { isMainThread } from "worker_threads"
 // datebase
-import General from "@DB/book/general"
+import General from "@DB/general/api"
 import { domainPublic } from "@UT/config"
 
 const nameGame = "genshin-impact"
@@ -625,7 +625,8 @@ class GI {
 				main: item.mainPropDepotId,
 				sub: item.appendPropDepotId,
 				starType: rank,
-				equipType: getEquipType(item.equipType)
+				equipType: getEquipType(item.equipType),
+				appendPropNum: item.appendPropNum,
 			}
 			if (!fastcheck && !rebuild && (await General.itemExists(obj.id, obj.type))) {
 				log.info(`ReliquaryConfig already exists, skipping ${obj.id} (${obj.type})`)
@@ -661,7 +662,8 @@ class GI {
 					`${DUMP_GI}/${iconName}.png`, // local file dump (private)
 					`${FOLDER_GI}/icon/artifact/${iconName}.png`, // local file (public)
 					`${domainPublic}/resources/${nameGame}/icon/artifact/${iconName}.png`, // url public
-					`https://upload-os-bbs.mihoyo.com/game_record/genshin/equip/${iconName}.png` // fallback url
+					`https://api.hakush.in/gi/UI/${iconName}.webp`,
+					replace
 				)
 			}
 

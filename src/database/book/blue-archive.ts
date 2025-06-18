@@ -5,7 +5,7 @@ import { domainPublic } from "@UT/config"
 // thrid party
 import { isMainThread } from "worker_threads"
 // datebase
-import General from "@DB/book/general"
+import General from "@DB/general/api"
 import ExcelManagerBa from "@UT/excelBa"
 
 const nameGame = "blue-archive"

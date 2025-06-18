@@ -1,6 +1,6 @@
 import Logger from "@UT/logger"
 // datebase
-import General from "@DB/book/general"
+import General from "@DB/general/api"
 import { readJsonFileAsync } from "./library"
 
 const log = new Logger("Excel")

@@ -536,9 +536,12 @@ export const _ = {
 						embedding: 0 // Exclude embedding field to reduce response size
 					}
 				}
-			] // If includeOwnerData is true, add lookup stage to join with accounts collection
+			]
+			
+			// If includeOwnerData is true, add lookup stages to join with accounts collection
 			if (includeOwnerData) {
 				pipeline.push(
+					// First lookup for question owner
 					{
 						$lookup: {
 							from: "accounts",
@@ -562,6 +565,7 @@ export const _ = {
 							as: "ownerData"
 						}
 					},
+					// Transform question owner data and prepare answers for processing
 					{
 						$addFields: {
 							owner: {
@@ -584,13 +588,151 @@ export const _ = {
 										avatar: null // Avatar field not available in AccountDB
 									}
 								}
+							},
+							// Process answers array if it exists - preserve structure for next stage
+							answer: {
+								$cond: {
+									if: { $isArray: "$answer" },
+									then: {
+										$map: {
+											input: "$answer",
+											as: "ans",
+											in: {
+												id: "$$ans.id",
+												answer: "$$ans.answer",
+												embedding: "$$ans.embedding",
+												vote: "$$ans.vote",
+												time: "$$ans.time",
+												update: "$$ans.update",
+												// Keep original owner field for lookup
+												originalOwner: "$$ans.owner",
+												owner: "$$ans.owner" // This will be transformed in next stage
+											}
+										}
+									},
+									else: "$answer"
+								}
 							}
 						}
 					},
+					// Second lookup for answer owners (only if answers exist)
+					{
+						$lookup: {
+							from: "accounts",
+							let: { 
+								answerOwners: {
+									$cond: {
+										if: { $isArray: "$answer" },
+										then: { $map: { input: "$answer", as: "ans", in: "$$ans.originalOwner" } },
+										else: []
+									}
+								}
+							},
+							pipeline: [
+								{
+									$match: {
+										$expr: {
+											$or: [
+												{
+													$in: [
+														"$_id",
+														"$$answerOwners"
+													]
+												},
+												{
+													$in: [
+														"$_id",
+														{ $map: { input: "$$answerOwners", as: "owner", in: { $toString: "$$owner" } } }
+													]
+												},
+												{
+													$in: [
+														"$_id",
+														{ $map: { input: "$$answerOwners", as: "owner", in: { $toInt: "$$owner" } } }
+													]
+												}
+											]
+										}
+									}
+								}
+							],
+							as: "answerOwnerData"
+						}
+					},
+					// Transform answer owner data
+					{
+						$addFields: {
+							answer: {
+								$cond: {
+									if: { $isArray: "$answer" },
+									then: {
+										$map: {
+											input: "$answer",
+											as: "ans",
+											in: {
+												id: "$$ans.id",
+												answer: "$$ans.answer",
+												embedding: "$$ans.embedding",
+												vote: "$$ans.vote",
+												time: "$$ans.time",
+												update: "$$ans.update",
+												owner: {
+													$let: {
+														vars: {
+															matchedOwner: {
+																$arrayElemAt: [
+																	{
+																		$filter: {
+																			input: "$answerOwnerData",
+																			cond: {
+																				$or: [
+																					{ $eq: ["$$this._id", "$$ans.originalOwner"] },
+																					{ $eq: ["$$this._id", { $toString: "$$ans.originalOwner" }] },
+																					{ $eq: ["$$this._id", { $toInt: "$$ans.originalOwner" }] }
+																				]
+																			}
+																		}
+																	},
+																	0
+																]
+															}
+														},
+														in: {
+															$cond: {
+																if: { $ne: ["$$matchedOwner", null] },
+																then: {
+																	uid: "$$ans.originalOwner",
+																	username: {
+																		$ifNull: [
+																			"$$matchedOwner.username",
+																			{ $concat: ["User_", { $toString: "$$ans.originalOwner" }] }
+																		]
+																	},
+																	avatar: null
+																},
+																else: {
+																	uid: "$$ans.originalOwner",
+																	username: { $concat: ["User1_", { $toString: "$$ans.originalOwner" }] },
+																	avatar: null
+																}
+															}
+														}
+													}
+												}
+											}
+										}
+									},
+									else: "$answer"
+								}
+							}
+						}
+					},
+					// Clean up temporary fields
 					{
 						$project: {
 							ownerData: 0, // Remove the temporary ownerData field
-							_id: 0, // Exclude MongoDB’s default _id field
+							answerOwnerData: 0, // Remove the temporary answerOwnerData field
+							_id: 0, // Exclude MongoDB's default _id field
 							type: 0, // Exclude type field if not needed
 						}
 					}

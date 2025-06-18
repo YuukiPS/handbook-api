@@ -2,8 +2,9 @@ import Logger from "@UT/logger"
 import { Command } from "./Interface"
 import AI from "@SV/ai"
 import fs from "fs"
-import { CommandData, getTypeGameEngine, QuestionData, TypeDocumentation } from "@UT/response"
+import { AnswerData, QuestionData, TypeArticle } from "@UT/response"
 import { getTimeV2 } from "@UT/library"
+import General from "@DB/general/api"
 
 const log = new Logger("/dataset", "blue")
 
@@ -67,6 +68,8 @@ function parseLine(line: string, nextLine: string, fields: string[], startsWith:
 
 export default async function handle(command: Command) {
 	log.log(`Dataset: ${command.args.join(" ")}`)
+
+	/*
 	const commandUsagePairs = parseMarkdown(`${FOLDER}/dataset.md`, "Command", "| `", [
 		"command",
 		"description",
@@ -91,7 +94,7 @@ export default async function handle(command: Command) {
 			vote: 0,
 			view: 0,
 			tag: [`Command`],
-			type: TypeDocumentation.Command,
+			type: TypeArticle.Command,
 			language: "EN",
 			embedding: []
 		}
@@ -100,33 +103,54 @@ export default async function handle(command: Command) {
 	}
 
 	log.info(`Done ${toadd.length} command to database`)
+	*/
 
 	const questionAnswerPairs = parseMarkdown(`${FOLDER}/dataset.md`, "Knowledge", "Q:", [
 		"question",
 		"answer"
 	]) as QAData[]
 	//log.log(`QA: `, questionAnswerPairs)
-	var toadd2: QuestionData[] = []
+	//var toadd2: QuestionData[] = []
 	for (const pair of questionAnswerPairs) {
 		log.log(`Q: ${pair.question}`)
 		log.log(`A: ${pair.answer}`)
+		var dataSet1 = await AI.createEmbedding([`${pair.question} ${pair.answer}`]);
+		var answer: AnswerData = {
+			id: 1,
+			answer: pair.answer,
+			vote: 0,
+			owner: 110000000, // yuuki account
+			time: getTimeV2(true),
+			update: getTimeV2(true)
+		}
 		var ask: QuestionData = {
 			question: pair.question.endsWith("\\") ? pair.question.slice(0, -1) : pair.question,
-			answer: pair.answer,
+			//answer: pair.answer,
 			id: 0, // set 0 for auto increment
 			owner: 110000000, // yuuki account
 			time: getTimeV2(true),
 			update: getTimeV2(true),
 			vote: 0,
 			view: 0,
-			tag: [`QA`],
-			type: TypeDocumentation.Question,
+			tag: ["Official", "Dataset"],
+			type: TypeArticle.Question,
 			language: "EN",
-			embedding: []
+			embedding: [dataSet1],
+			answer: [answer],
+			answerId: 1, // link to answer
+			closed: true,
+			resolved: true, // always resolved
 		}
-		ask.embedding = await AI.createEmbedding([`${ask.question} ${ask.answer}`])
-		toadd2.push(ask)
+		console.log(`DEBUG: ${JSON.stringify(ask, null, 2)}`)
+		//sleep(5) // wait 5 seconds to avoid rate limit
+		var isAdd = await General.addArticle(ask);
+		if (isAdd) {
+			log.info(`Question added: ${ask.question} with answer ${answer.answer}`)
+		} else {
+			log.error(`Failed to add question: ${ask.question}`)
+		}
+		//toadd2.push(ask)
 	}
 
-	log.info(`done ${toadd.length} question to database`)
+	//log.info(`done ${toadd2.length} question to database`)
 }
