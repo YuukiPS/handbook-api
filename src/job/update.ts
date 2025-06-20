@@ -6,6 +6,7 @@ import { GetProfile } from "@UT/config"
 import BOOK_GI from "@DB/book/genshin-impact"
 import BOOK_SR from "@DB/book/star-rail"
 import BOOK_BA from "@DB/book/blue-archive"
+import { clearTextMapCache } from "@UT/library"
 
 const log = new Logger("Update")
 
@@ -57,6 +58,7 @@ class Update {
 		// GI - https://gitlab.com/Dimbreath/AnimeGameData
 		// SR - https://gitlab.com/Dimbreath/turnbasedgamedata
 		// BA - https://schaledb.com - TODO: use real dump or raw github (https://github.com/feilongproject/ba-data)
+		clearTextMapCache() // clear cache textmap in memory before update
 		await BOOK_GI.Update(skip_update, rebuild, dont_build, replace)
 		await BOOK_SR.Update(skip_update, rebuild, dont_build, replace)
 		//await BOOK_BA.Update(skip_update, rebuild, dont_build, replace)

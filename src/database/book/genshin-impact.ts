@@ -1247,7 +1247,7 @@ class GI {
 					obj.game
 				)
 				if (Object.keys(obj.name).length === 0) {
-					log.warn(`skip avatar ${id}`)
+					log.warn(`skip avatar ${id} > ${data.nameTextMapHash}`)
 					continue
 				}
 

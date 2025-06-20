@@ -6,6 +6,6 @@ const log = new Logger("/ping", "blue")
 
 export default async function handle(command: Command) {
 	log.log(`Sync manual`)
-	await job.Sync(true, true, false, true)
-	//await job.Sync(false,false)
+	//await job.Sync(true, true, false, true)
+	await job.Sync(false,false)
 }

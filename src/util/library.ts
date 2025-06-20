@@ -312,6 +312,20 @@ export function readJsonFileCached(filePath: string): Record<string, string> {
 	return textMapCache[filePath]
 }
 
+/**
+ * Clear all cached JSON files from memory.
+ */
+export function clearTextMapCache(): void {
+	Object.keys(textMapCache).forEach(key => delete textMapCache[key])
+}
+
+/**
+ * Clear a specific cached JSON file from memory.
+ */
+export function clearTextMapCacheFile(filePath: string): void {
+	delete textMapCache[filePath]
+}
+
 export function createEnum(keys: string[], nameFunc: string): string {
 	// derive PascalCase enum name from your getter name
 	const enumName = nameFunc.replace(/^get/, "").replace(/^[a-z]/, (c) => c.toUpperCase())
