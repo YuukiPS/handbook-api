@@ -430,6 +430,163 @@ export const _ = {
 			return false
 		}
 	},
+	removeArticle: async function (id: number): Promise<{
+		message: string
+		retcode: number
+		data: { deletedCount: number } | null
+	}> {
+		try {
+			await DBMongo.isConnected()
+			const collection = DBMongo.getCollection<ArticleData>("article")
+			if (!collection) {
+				log.errorNoStack("api_db_nofound_collection_article")
+				return {
+					message: "api_db_nofound_collection_article",
+					retcode: -1,
+					data: null
+				}
+			}
+
+			const result = await collection.deleteOne({ id })
+
+			if (result.deletedCount > 0) {
+				log.info(`Successfully removed article with id: ${id}`)
+				return {
+					message: "api_db_article_remove_success",
+					retcode: 0,
+					data: { deletedCount: result.deletedCount }
+				}
+			} else {
+				log.warn(`Article with id ${id} not found for removal`)
+				return {
+					message: "api_db_article_remove_notfound",
+					retcode: -1,
+					data: { deletedCount: 0 }
+				}
+			}
+		} catch (error) {
+			log.error("removeArticle error:", error)
+			return {
+				message: "api_db_article_remove_error",
+				retcode: -1,
+				data: null
+			}
+		}
+	},
+	editArticle: async function (
+		id: number,
+		uid: number,
+		updateData: Partial<ArticleData>
+	): Promise<{
+		message: string
+		retcode: number
+		data: { modifiedCount: number; matchedCount: number } | null
+	}> {
+		try {
+			await DBMongo.isConnected()
+			const collection = DBMongo.getCollection<ArticleData>("article")
+			if (!collection) {
+				log.errorNoStack("api_db_nofound_collection_article")
+				return {
+					message: "api_db_nofound_collection_article",
+					retcode: -1,
+					data: null
+				}
+			}
+
+			// Remove id and owner from updateData to prevent overwriting
+			const { id: _removeId, owner: _removeOwner, ...providedData } = updateData
+
+			// Only include fields that are not empty/undefined
+			const dataToUpdate: any = {}
+			
+			Object.entries(providedData).forEach(([key, value]: [string, any]) => {
+				if (value !== undefined && value !== null) {
+					// Handle different value types appropriately
+					if (Array.isArray(value)) {
+						// For arrays, only include if they have content
+						if (value.length > 0) {
+							dataToUpdate[key] = value
+						}
+					} else if (typeof value === 'string') {
+						// For strings, only include if not empty
+						if (value.trim() !== '') {
+							dataToUpdate[key] = value
+						}
+					} else if (typeof value === 'number') {
+						// For numbers, include all valid numbers (including 0)
+						dataToUpdate[key] = value
+					} else if (typeof value === 'boolean') {
+						// For booleans, include all values
+						dataToUpdate[key] = value
+					} else {
+						// For other types (objects, etc.), include if truthy
+						if (value) {
+							dataToUpdate[key] = value
+						}
+					}
+				}
+			})
+
+			// Always add update timestamp if there are changes to make
+			if (Object.keys(dataToUpdate).length > 0) {
+				dataToUpdate.update = getTimeV2()
+			} else {
+				// No valid changes provided
+				return {
+					message: "api_db_article_edit_no_valid_changes",
+					retcode: 0,
+					data: { modifiedCount: 0, matchedCount: 0 }
+				}
+			}
+
+			// Query must match both id and owner for security
+			const query = { id, owner: uid }
+
+			const result = await collection.updateOne(query, { $set: dataToUpdate })
+
+			if (result.matchedCount > 0) {
+				if (result.modifiedCount > 0) {
+					log.info(`Successfully updated article with id: ${id} by owner: ${uid}`)
+					return {
+						message: "api_db_article_edit_success",
+						retcode: 0,
+						data: {
+							modifiedCount: result.modifiedCount,
+							matchedCount: result.matchedCount
+						}
+					}
+				} else {
+					log.info(`Article with id ${id} found but no changes were made`)
+					return {
+						message: "api_db_article_edit_no_changes",
+						retcode: 0,
+						data: {
+							modifiedCount: result.modifiedCount,
+							matchedCount: result.matchedCount
+						}
+					}
+				}
+			} else {
+				log.warn(`Article with id ${id} not found or user ${uid} is not the owner`)
+				return {
+					message: "api_db_article_edit_notfound_or_unauthorized",
+					retcode: -1,
+					data: {
+						modifiedCount: 0,
+						matchedCount: 0
+					}
+				}
+			}
+		} catch (error) {
+			log.error("editArticle error:", error)
+			return {
+				message: "api_db_article_edit_error",
+				retcode: -1,
+				data: null
+			}
+		}
+	},
 	findTopKSimilar: async function (
 		queryEmbedding: number[],
 		type: TypeArticle,
@@ -537,7 +694,7 @@ export const _ = {
 					}
 				}
 			]
-			
+
 			// If includeOwnerData is true, add lookup stages to join with accounts collection
 			if (includeOwnerData) {
 				pipeline.push(
@@ -619,7 +776,7 @@ export const _ = {
 					{
 						$lookup: {
 							from: "accounts",
-							let: { 
+							let: {
 								answerOwners: {
 									$cond: {
 										if: { $isArray: "$answer" },
@@ -634,21 +791,30 @@ export const _ = {
 										$expr: {
 											$or: [
 												{
+													$in: ["$_id", "$$answerOwners"]
+												},
+												{
 													$in: [
 														"$_id",
-														"$$answerOwners"
+														{
+															$map: {
+																input: "$$answerOwners",
+																as: "owner",
+																in: { $toString: "$$owner" }
+															}
+														}
 													]
 												},
 												{
 													$in: [
 														"$_id",
-														{ $map: { input: "$$answerOwners", as: "owner", in: { $toString: "$$owner" } } }
-													]
-												},
-												{
-													$in: [
-														"$_id",
-														{ $map: { input: "$$answerOwners", as: "owner", in: { $toInt: "$$owner" } } }
+														{
+															$map: {
+																input: "$$answerOwners",
+																as: "owner",
+																in: { $toInt: "$$owner" }
+															}
+														}
 													]
 												}
 											]
@@ -686,9 +852,29 @@ export const _ = {
 																			input: "$answerOwnerData",
 																			cond: {
 																				$or: [
-																					{ $eq: ["$$this._id", "$$ans.originalOwner"] },
-																					{ $eq: ["$$this._id", { $toString: "$$ans.originalOwner" }] },
-																					{ $eq: ["$$this._id", { $toInt: "$$ans.originalOwner" }] }
+																					{
+																						$eq: [
+																							"$$this._id",
+																							"$$ans.originalOwner"
+																						]
+																					},
+																					{
+																						$eq: [
+																							"$$this._id",
+																							{
+																								$toString:
+																									"$$ans.originalOwner"
+																							}
+																						]
+																					},
+																					{
+																						$eq: [
+																							"$$this._id",
+																							{
+																								$toInt: "$$ans.originalOwner"
+																							}
+																						]
+																					}
 																				]
 																			}
 																		}
@@ -705,14 +891,24 @@ export const _ = {
 																	username: {
 																		$ifNull: [
 																			"$$matchedOwner.username",
-																			{ $concat: ["User_", { $toString: "$$ans.originalOwner" }] }
+																			{
+																				$concat: [
+																					"User_",
+																					{ $toString: "$$ans.originalOwner" }
+																				]
+																			}
 																		]
 																	},
 																	avatar: null
 																},
 																else: {
 																	uid: "$$ans.originalOwner",
-																	username: { $concat: ["User1_", { $toString: "$$ans.originalOwner" }] },
+																	username: {
+																		$concat: [
+																			"User1_",
+																			{ $toString: "$$ans.originalOwner" }
+																		]
+																	},
 																	avatar: null
 																}
 															}
@@ -733,7 +929,7 @@ export const _ = {
 							ownerData: 0, // Remove the temporary ownerData field
 							answerOwnerData: 0, // Remove the temporary answerOwnerData field
 							_id: 0, // Exclude MongoDB's default _id field
-							type: 0, // Exclude type field if not needed
+							type: 0 // Exclude type field if not needed
 						}
 					}
 				)
@@ -751,6 +947,293 @@ export const _ = {
 			log.error("listAsk error:", error)
 			return {
 				message: "api_db_article_list_error",
+				retcode: -1,
+				data: null
+			}
+		}
+	},
+	/**
+	 * List all blog articles from the database with owner information populated
+	 *
+	 * @param limit - Maximum number of blogs to return (default: 10)
+	 * @param page - Page number for pagination (default: 1)
+	 * @param search - Search term to query tags, titles, or shortContent
+	 * @param tags - Filter by specific tags (array of tag strings)
+	 * @param includeOwnerData - Whether to populate owner data from accounts (default: true)
+	 * @param includeContent - Whether to include the full content field (default: false)
+	 */
+	listBlog: async function (
+		limit: number = 10,
+		page: number = 1,
+		search?: string,
+		tags?: string[],
+		includeOwnerData: boolean = true,
+		includeContent: boolean = false
+	): Promise<{
+		message: string
+		retcode: number
+		data: any[] | null
+		total?: number
+	}> {
+		try {
+			await DBMongo.isConnected()
+			const collection = DBMongo.getCollection<ArticleData>("article")
+			if (!collection) {
+				log.errorNoStack("api_db_nofound_collection_article")
+				return {
+					message: "api_db_nofound_collection_article",
+					retcode: -1,
+					data: null
+				}
+			}
+
+			// Calculate skip for pagination
+			const skip = (page - 1) * limit
+
+			// Build query to find only blog articles
+			const query: any = { type: TypeArticle.Blog }
+
+			// Add search functionality
+			if (search) {
+				const searchRegex = { $regex: search, $options: "i" }
+				query.$or = [
+					{ title: searchRegex },
+					{ shortContent: searchRegex },
+					{ content: searchRegex },
+					{ tag: { $in: [searchRegex] } }
+				]
+			}
+
+			// Add tag filtering
+			if (tags && tags.length > 0) {
+				query.tag = { $in: tags }
+			}
+
+			// Get total count for pagination info
+			const total = await collection.countDocuments(query)
+
+			// Build aggregation pipeline
+			const pipeline: any[] = [
+				{ $match: query },
+				{ $sort: { time: -1 } }, // Sort by creation time, newest first
+				{ $skip: skip },
+				{ $limit: limit },
+				{
+					$project: {
+						embedding: 0, // Always exclude embedding field to reduce response size
+						...(includeContent ? {} : { content: 0 }) // Conditionally exclude content field
+					}
+				}
+			]
+
+			// If includeOwnerData is true, add lookup stages to join with accounts collection
+			if (includeOwnerData) {
+				pipeline.push(
+					// Lookup for blog owner
+					{
+						$lookup: {
+							from: "accounts",
+							let: { ownerId: "$owner" },
+							pipeline: [
+								{
+									$match: {
+										$expr: {
+											$or: [
+												// Try direct match first (if both are same type)
+												{ $eq: ["$_id", "$$ownerId"] },
+												// Try string conversion (if owner is number, _id is string)
+												{ $eq: ["$_id", { $toString: "$$ownerId" }] },
+												// Try number conversion (if owner is string, _id is number)
+												{ $eq: ["$_id", { $toInt: "$$ownerId" }] }
+											]
+										}
+									}
+								}
+							],
+							as: "ownerData"
+						}
+					},
+					// Transform blog owner data
+					{
+						$addFields: {
+							owner: {
+								$cond: {
+									if: { $eq: [{ $size: "$ownerData" }, 0] },
+									// No account found - create fallback owner object
+									then: {
+										uid: "$owner",
+										username: { $concat: ["User1_", { $toString: "$owner" }] },
+										avatar: null
+									}, // Account found - use account data
+									else: {
+										uid: "$owner",
+										username: {
+											$ifNull: [
+												{ $arrayElemAt: ["$ownerData.username", 0] },
+												{ $concat: ["User_", { $toString: "$owner" }] }
+											]
+										},
+										avatar: null // Avatar field not available in AccountDB
+									}
+								}
+							}
+						}
+					},
+					// Clean up temporary fields
+					{
+						$project: {
+							ownerData: 0, // Remove the temporary ownerData field
+							_id: 0, // Exclude MongoDB's default _id field
+							type: 0 // Exclude type field if not needed
+						}
+					}
+				)
+			}
+
+			const blogs = await collection.aggregate(pipeline).toArray()
+
+			return {
+				message: "api_db_article_list_success",
+				retcode: 0,
+				data: blogs,
+				total
+			}
+		} catch (error) {
+			log.error("listBlog error:", error)
+			return {
+				message: "api_db_article_list_error",
+				retcode: -1,
+				data: null
+			}
+		}
+	},
+	/**
+	 * Get details of a single blog article by ID or slug
+	 *
+	 * @param identifier - Article ID (number) or slug (string) to search for
+	 * @param includeContent - Whether to include the full content field (default: true)
+	 */
+	detailsBlog: async function (
+		identifier: number | string,
+		includeContent: boolean = true
+	): Promise<{
+		message: string
+		retcode: number
+		data: any | null
+	}> {
+		try {
+			await DBMongo.isConnected()
+			const collection = DBMongo.getCollection<ArticleData>("article")
+			if (!collection) {
+				log.errorNoStack("api_db_nofound_collection_article")
+				return {
+					message: "api_db_nofound_collection_article",
+					retcode: -1,
+					data: null
+				}
+			}
+
+			// Build query to find blog article by ID or slug
+			const query: any = { type: TypeArticle.Blog }
+
+			if (typeof identifier === "number") {
+				// Search by article ID
+				query.id = identifier
+			} else {
+				// Search by slug (case-insensitive)
+				query.slug = { $regex: identifier, $options: "i" }
+			}
+
+			// Build aggregation pipeline - always include owner data, conditionally include content
+			const pipeline: any[] = [
+				{ $match: query },
+				{ $limit: 1 }, // Only get one result
+				{
+					$project: {
+						embedding: 0, // Always exclude embedding field to reduce response size
+						...(includeContent ? {} : { content: 0 }) // Conditionally exclude content field
+					}
+				},
+				// Lookup for blog owner
+				{
+					$lookup: {
+						from: "accounts",
+						let: { ownerId: "$owner" },
+						pipeline: [
+							{
+								$match: {
+									$expr: {
+										$or: [
+											// Try direct match first (if both are same type)
+											{ $eq: ["$_id", "$$ownerId"] },
+											// Try string conversion (if owner is number, _id is string)
+											{ $eq: ["$_id", { $toString: "$$ownerId" }] },
+											// Try number conversion (if owner is string, _id is number)
+											{ $eq: ["$_id", { $toInt: "$$ownerId" }] }
+										]
+									}
+								}
+							}
+						],
+						as: "ownerData"
+					}
+				},
+				// Transform blog owner data
+				{
+					$addFields: {
+						owner: {
+							$cond: {
+								if: { $eq: [{ $size: "$ownerData" }, 0] },
+								// No account found - create fallback owner object
+								then: {
+									uid: "$owner",
+									username: { $concat: ["User1_", { $toString: "$owner" }] },
+									avatar: null
+								}, // Account found - use account data
+								else: {
+									uid: "$owner",
+									username: {
+										$ifNull: [
+											{ $arrayElemAt: ["$ownerData.username", 0] },
+											{ $concat: ["User_", { $toString: "$owner" }] }
+										]
+									},
+									avatar: null // Avatar field not available in AccountDB
+								}
+							}
+						}
+					}
+				},
+				// Clean up temporary fields
+				{
+					$project: {
+						ownerData: 0, // Remove the temporary ownerData field
+						_id: 0, // Exclude MongoDB's default _id field
+						type: 0 // Exclude type field if not needed
+					}
+				}
+			]
+
+			const result = await collection.aggregate(pipeline).toArray()
+			const blog = result[0] || null
+
+			if (blog) {
+				return {
+					message: "api_db_article_detail_success",
+					retcode: 0,
+					data: blog
+				}
+			} else {
+				return {
+					message: "api_db_article_detail_notfound",
+					retcode: -1,
+					data: null
+				}
+			}
+		} catch (error) {
+			log.error("detailsBlog error:", error)
+			return {
+				message: "api_db_article_detail_error",
 				retcode: -1,
 				data: null
 			}

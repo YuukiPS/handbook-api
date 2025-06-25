@@ -102,6 +102,16 @@ export interface CommonDataRsp<T> {
 export interface AccountDB extends Document {
 	_id: string
 	tokenAPI: string // code cmd,
+	role: Role[]
+}
+export enum Role {
+  BLANK = 0,
+  ADMIN = 1,
+  MOD = 2,
+  MEMBER = 3,
+  SPONSOR = 4,
+  BAN = 5,
+  EDITOR = 6,
 }
 export interface PlayerBasic {
 	uid: number // player uid
@@ -839,6 +849,12 @@ export function getAllTypeArticle(): string[] {
 		.map((key) => TypeArticle[key as keyof typeof TypeArticle])
 		.filter((value) => typeof value === "string") as string[]
 }
+export enum TypeGame {
+	None = 0,
+	GenshinImpact = 1,
+	StarRail = 2,
+	BlueArchive = 3
+}
 // Note: CP/LC now its same, GIO/VIA now its same
 export enum GameEngine {
 	None = 0,
@@ -874,7 +890,7 @@ export interface ArticleData {
 	view: number // view count for how many times this article has been viewed
 	tag: string[] // like keywords, or tags
 	type: TypeArticle
-	language: string // language article use, like en, id, th, etc
+	//language: string // language article use, like en, id, th, etc or maybe use another column match id for multi language
 	embedding?: number[] // https://platform.openai.com/docs/models/embeddings (not use in meta blog)
 }
 export interface AnswerData {
@@ -905,9 +921,8 @@ export interface BlogData extends ArticleData {
 	title: string
 	slug?: string // slug for url, if not set use title or id
 	content: string // markdown content or html content (in meta dont add it)
-	shortContent?: string // short content for blog, if not set use first 100 char from content
+	shortContent?: string // short content for blog, if not set use first 100 char from content (just like description)
 	thumbnail?: string // thumbnail image for blog
-	description?: string // description for blog, if not set use first 100 char from content
 	comment: boolean // if true allow comment on blog
 	index: boolean // if true index this blog in search engine
 }

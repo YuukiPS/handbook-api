@@ -6,16 +6,47 @@ import { getTimeV2, isEmpty } from "@UT/library"
 import SRTool from "@DB/book/star-rail"
 import General from "@DB/general/api"
 import Yuuki from "@DB/general/yuuki"
-import { AccountDB, BuildData, SRToolsReq } from "@UT/response"
+import { AccountDB, BlogData, BuildData, Role, SRToolsReq, TypeArticle } from "@UT/response"
+import { statusCodes } from "@UT/constants"
 
 const r = express.Router()
 
 const log = new Logger("Web")
 
 r.all("/", (req: Request, res: Response) => {
-	res.send(`Book API`)
+	res.send({
+		message: "Welcome to the Handbook API",
+		version: "0.0.1"
+	})
 })
 
+r.get("/game/resource/version", async (req: Request, res: Response) => {
+	var getLastGI = (await Yuuki.getProp("commit_gi")).data?.value || "?"
+	var getLastSR = (await Yuuki.getProp("commit_sr")).data?.value || "?"
+	var getLastBA = (await Yuuki.getProp("commit_ba")).data?.value || "?"
+	res.send([
+		{
+			id: 1,
+			game: "Genshin Impact",
+			version: "5.7",
+			commit: getLastGI
+		},
+		{
+			id: 2,
+			game: "Star Rail",
+			version: "3.3",
+			commit: getLastSR
+		},
+		{
+			id: 3,
+			game: "Blue Archive",
+			version: "1.57",
+			commit: getLastBA
+		}
+	])
+})
+
+/*
 r.all("/ai/ask", async (req: Request, res: Response) => {
 	const { message, uid, json } = req.query
 	var isJson = false
@@ -30,12 +61,181 @@ r.all("/ai/ask", async (req: Request, res: Response) => {
 	log.info(`AI: ${uid} > `, result)
 	res.send(result)
 })
+*/
 
-r.all("/ask/list", async (req: Request, res: Response) => {
+r.get("/ask/list", async (req: Request, res: Response) => {
 	const { page, limit } = req.query
 	const pageNum = parseInt(page as string) || 1
 	const limitNum = parseInt(limit as string) || 10
 	const result = await General.listAsk(limitNum, pageNum)
+	return res.json(result)
+})
+
+r.get("/blog/list", async (req: Request, res: Response) => {
+	const { page, limit, tags, search, content } = req.query
+	const pageNum = parseInt(page as string) || 1
+	const limitNum = parseInt(limit as string) || 10
+	const tagsArray = typeof tags === "string" ? tags.split(",").map((tag) => tag.trim()) : []
+	const searchString = (search as string) || ""
+	const result = await General.listBlog(limitNum, pageNum, searchString, tagsArray)
+	return res.json(result)
+})
+r.get("/blog/detail/:id", async (req: Request, res: Response) => {
+	const { id } = req.params
+	if (!id || isNaN(parseInt(id))) {
+		return res.json({
+			status: "Invalid ID",
+			retcode: statusCodes.error.FAIL
+		})
+	}
+	const { full } = req.query
+	const fullDetails = full === "true" || full === "1" // Convert to boolean
+	const result = await General.detailsBlog(parseInt(id), fullDetails)
+	return res.json(result)
+})
+r.post("/blog/create", async (req: Request, res: Response) => {
+	const { title, slug, content, shortContent, thumbnail, comment, index, tags, language } = req.body
+	var auth = req.headers.authorization
+	if (isEmpty(auth)) {
+		return res.json({
+			status: "No session?",
+			retcode: statusCodes.error.FAIL
+		})
+	}
+	if (isEmpty(title) || isEmpty(content) || isEmpty(shortContent) || isEmpty(slug)) {
+		return res.json({
+			status: "Title, content, shortContent, and slug are required",
+			retcode: statusCodes.error.FAIL
+		})
+	}
+	var rAccount = await Yuuki.GET_ACCOUNT_BY_TOKEN_WEB(auth as string)
+	if (!rAccount.data) {
+		return res.json({
+			status: rAccount.message || "Invalid session",
+			retcode: rAccount.retcode || statusCodes.error.LOGIN_FORBIDDED
+		})
+	}
+	var account = rAccount.data as AccountDB
+	log.info(`Creating blog post by ${account._id} (${account.role})`)
+	if (!account.role.includes(Role.EDITOR) && !account.role.includes(Role.ADMIN)) {
+		return res.json({
+			status: "You do not have permission to create a blog post",
+			retcode: statusCodes.error.LOGIN_FORBIDDED
+		})
+	}
+	var isComment = comment === true || comment === "true" || comment === "1"
+	var isIndex = index === true || index === "true" || index === "1"
+	var tagArray = Array.isArray(tags) ? tags : tags ? (tags as string).split(",").map((tag) => tag.trim()) : []
+	var blog: BlogData = {
+		id: 0, // set 0 for auto increment
+		title,
+		slug,
+		content,
+		shortContent,
+		thumbnail,
+		comment: isComment,
+		index: isIndex,
+		owner: parseInt(account._id),
+		time: getTimeV2(true),
+		update: getTimeV2(true),
+		vote: 0,
+		view: 0,
+		tag: tagArray,
+		type: TypeArticle.Blog
+		//language
+	}
+	var isAdd = await General.addArticle(blog)
+	return res.json({
+		status: isAdd ? "Blog post created successfully" : "Failed to create blog post",
+		retcode: isAdd ? statusCodes.success.RETCODE : statusCodes.error.CANCEL
+		//data: isAdd ? blog : null
+	})
+})
+r.post("/blog/edit/:id", async (req: Request, res: Response) => {
+	const { title, slug, content, shortContent, thumbnail, comment, index, tags, language } = req.body
+	const { id } = req.params
+	var auth = req.headers.authorization
+	if (!id || isNaN(parseInt(id))) {
+		return res.json({
+			status: "Invalid ID",
+			retcode: statusCodes.error.FAIL
+		})
+	}
+	if (isEmpty(auth)) {
+		return res.json({
+			status: "No session?",
+			retcode: statusCodes.error.FAIL
+		})
+	}
+	/*
+	if (isEmpty(title) || isEmpty(content) || isEmpty(shortContent) || isEmpty(slug)) {
+		return res.json({
+			status: "Title, content, shortContent, and slug are required",
+			retcode: statusCodes.error.FAIL
+		})
+	}
+	*/
+	var rAccount = await Yuuki.GET_ACCOUNT_BY_TOKEN_WEB(auth as string)
+	if (!rAccount.data) {
+		return res.json({
+			status: rAccount.message || "Invalid session",
+			retcode: rAccount.retcode || statusCodes.error.LOGIN_FORBIDDED
+		})
+	}
+	var account = rAccount.data as AccountDB
+	log.info(`Editing blog post by ${account._id} (${account.role})`)
+	if (!account.role.includes(Role.EDITOR) && !account.role.includes(Role.ADMIN)) {
+		return res.json({
+			status: "You do not have permission to edit a blog post",
+			retcode: statusCodes.error.LOGIN_FORBIDDED
+		})
+	}
+	var isComment = comment === true || comment === "true" || comment === "1"
+	var isIndex = index === true || index === "true" || index === "1"
+	var tagArray = Array.isArray(tags) ? tags : tags ? (tags as string).split(",").map((tag) => tag.trim()) : []
+	var blogUpdate: Partial<BlogData> = {
+		title,
+		slug,
+		content,
+		shortContent,
+		thumbnail,
+		comment: isComment,
+		index: isIndex,
+		update: getTimeV2(true),
+		tag: tagArray
+	}
+	var result = await General.editArticle(parseInt(id), parseInt(account._id), blogUpdate)
+	return res.json({
+		status: result.retcode === 0 ? "Blog post updated successfully" : result.message,
+		retcode: result.retcode,
+		data: result.data
+	})
+})
+r.delete("/article/remove/:id", async (req: Request, res: Response) => {
+	const { id } = req.params
+	if (!id || isNaN(parseInt(id))) {
+		return res.json({
+			status: "Invalid ID",
+			retcode: statusCodes.error.FAIL
+		})
+	}
+	var auth = req.headers.authorization
+	const rAccount = await Yuuki.GET_ACCOUNT_BY_TOKEN_WEB(auth as string)
+	if (!rAccount.data) {
+		return res.json({
+			status: rAccount.message || "Invalid session",
+			retcode: rAccount.retcode || statusCodes.error.LOGIN_FORBIDDED
+		})
+	}
+	const account = rAccount.data as AccountDB
+	log.info(`Removing article with ID ${id} by ${account._id} (${account.role})`)
+	if (!account.role.includes(Role.EDITOR) && !account.role.includes(Role.ADMIN)) {
+		return res.json({
+			status: "You do not have permission to remove an article",
+			retcode: statusCodes.error.LOGIN_FORBIDDED
+		})
+	}
+	const result = await General.removeArticle(parseInt(id))
 	return res.json(result)
 })
 

@@ -2,7 +2,7 @@ import Logger from "@UT/logger"
 import { Command } from "./Interface"
 import AI from "@SV/ai"
 import fs from "fs"
-import { AnswerData, QuestionData, TypeArticle } from "@UT/response"
+import { AnswerData, BlogData, QuestionData, TypeArticle } from "@UT/response"
 import { getTimeV2 } from "@UT/library"
 import General from "@DB/general/api"
 
@@ -105,6 +105,7 @@ export default async function handle(command: Command) {
 	log.info(`Done ${toadd.length} command to database`)
 	*/
 
+	/*
 	const questionAnswerPairs = parseMarkdown(`${FOLDER}/dataset.md`, "Knowledge", "Q:", [
 		"question",
 		"answer"
@@ -151,6 +152,30 @@ export default async function handle(command: Command) {
 		}
 		//toadd2.push(ask)
 	}
+	*/
+
+	var blog: BlogData = {
+		id: 0, // set 0 for auto increment
+		title: "Testing blog",
+		slug: "testing-blog",
+		content: "This is a test blog for the dataset command. It contains commands and questions.",
+		shortContent: "This is a test blog for the dataset command.",
+		thumbnail: "https://urbanidea.id/wp-content/uploads/2024/11/material-ascend-kamisato-ayaka-genshin.webp",
+		comment: true,
+		index: true,
+		owner: 110000000, // yuuki account
+		time: getTimeV2(true),
+		update: getTimeV2(true),
+		vote: 0,
+		view: 0,
+		tag: ["Dataset", "Chatbot"],
+		type: TypeArticle.Blog
+		//language: "EN"
+	}
+	console.log(`DEBUG: ${JSON.stringify(blog, null, 2)}`)
+	//sleep(5) // wait 5 seconds to avoid rate limit
+	var isAdd = await General.addArticle(blog)
+	log.info(`Blog added: ${JSON.stringify(isAdd, null, 2)}`)
 
 	//log.info(`done ${toadd2.length} question to database`)
 }

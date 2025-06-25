@@ -19,12 +19,15 @@ w.use(cors())
 w.use(express.static("./src/server/web/public"))
 
 // Body
-w.use(express.urlencoded({ extended: true, limit: "10kb" }))
+w.use(express.urlencoded({ extended: true, limit: "100kb" }))
 w.use(express.text({ limit: "10kb" }))
 w.use(function (err: any, req: Request, res: Response, next: NextFunction) {
 	if (err) {
 		log.errorNoStack(`ErrorText: ${req.path} > ${err.message}`)
-		return res.send("limit send!")
+		return res.send({
+			code: 0,
+			status: `limit send!`
+		})
 	} else {
 		next(err)
 	}
