@@ -1,4 +1,8 @@
 import express, { Request, Response } from "express"
+import multer from "multer"
+import path from "path"
+import fs from "fs"
+import sharp from "sharp"
 import AI from "@SV/ai"
 import Logger from "@UT/logger"
 import { getTimeV2, isEmpty } from "@UT/library"
@@ -13,11 +17,245 @@ const r = express.Router()
 
 const log = new Logger("Web")
 
+// Cache for GitHub API proxy
+interface CacheEntry {
+	data: any
+	timestamp: number
+}
+
+const githubCache = new Map<string, CacheEntry>()
+const CACHE_DURATION = 60 * 1000 // 1 minute in milliseconds
+
+// Extend Request interface to include file property from multer
+interface MulterRequest extends Request {
+	file?: Express.Multer.File
+}
+
 r.all("/", (req: Request, res: Response) => {
 	res.send({
 		message: "Welcome to the Handbook API",
 		version: "0.0.1"
 	})
+})
+
+// Authorization middleware function
+const checkAuth = async (req: Request, res: Response, next: any) => {
+	try {
+		const auth = req.headers.authorization
+		if (isEmpty(auth)) {
+			return res.json({
+				status: "No session?",
+				retcode: statusCodes.error.FAIL
+			})
+		}
+
+		const rAccount = await Yuuki.GET_ACCOUNT_BY_TOKEN_WEB(auth as string)
+		if (!rAccount.data) {
+			return res.json({
+				status: rAccount.message || "Invalid session",
+				retcode: rAccount.retcode || statusCodes.error.LOGIN_FORBIDDED
+			})
+		}
+
+		// Attach account data to request for later use
+		;(req as any).account = rAccount.data as AccountDB
+		next()
+	} catch (error) {
+		log.error("Authorization error:", error)
+		return res.json({
+			status: "Authorization failed",
+			retcode: statusCodes.error.FAIL
+		})
+	}
+}
+
+// image upload endpoint with authorization checked first
+r.post("/upload/image/:id", checkAuth, async (req: MulterRequest, res: Response) => {
+	try {
+		var id = req.params.id
+		if (!(id == "user") && !(id == "avatar") && !(id == "blog")) {
+			return res.json({
+				status: "Invalid upload target",
+				retcode: statusCodes.error.FAIL
+			})
+		}
+		// Get account from middleware
+		const account = (req as any).account as AccountDB
+		const folder = `./src/server/web/public/image/${id}`
+		if (!fs.existsSync(folder)) {
+			fs.mkdirSync(folder, { recursive: true })
+		}
+		log.info(`image upload by ${account._id} (${account.role}) in folder ${folder}`)
+
+		// Create a custom multer instance for this specific request
+		const customImageUpload = multer({
+			storage: multer.diskStorage({
+				destination: (req, file, cb) => {
+					cb(null, folder)
+				},
+				filename: (req, file, cb) => {
+					const timestamp = Date.now()
+					// Always use .webp extension for optimized images
+					let filename: string
+					if (id === "user") {
+						filename = `${account._id}_${timestamp}.webp`
+					} else if (id === "blog") {
+						filename = `${account._id}_${timestamp}_original.webp`
+					} else {
+						filename = `${account._id}.webp`
+					}
+					cb(null, filename)
+				}
+			}),
+			limits: {
+				fileSize: 20 * 1024 * 1024, // 20MB limit
+				files: 1
+			},
+			fileFilter: (req, file, cb) => {
+				const allowedTypes = /jpeg|jpg|png|webp/ // todo support gif later
+				const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase())
+				const mimetype = allowedTypes.test(file.mimetype)
+				if (mimetype && extname) {
+					return cb(null, true)
+				} else {
+					cb(new Error("Only image files are allowed"))
+				}
+			}
+		}).single("image")
+
+		customImageUpload(req, res, async (err) => {
+			if (err) {
+				log.error("Image upload error:", err)
+				return res.json({
+					status: err instanceof Error ? err.message : "Image upload failed",
+					retcode: statusCodes.error.FAIL
+				})
+			}
+
+			if (!req.file) {
+				log.warn("No image file provided in the request")
+				return res.json({
+					status: "No image file provided",
+					retcode: statusCodes.error.FAIL
+				})
+			}
+
+			try {
+				// Convert all images to WebP format for optimization
+				const resizedImagePath = req.file.path
+				let thumbnailPath: string | null = null
+				let originalThumbnailPath: string | null = null
+
+				if (id === "avatar") {
+					// For avatar images, resize to 170x170 and convert to WebP
+					await sharp(req.file.path)
+						.resize(170, 170, {
+							fit: "cover",
+							position: "center"
+						})
+						.webp({ quality: 90 })
+						.toFile(resizedImagePath + ".tmp")
+				} else if (id === "blog") {
+					// First, convert original to WebP
+					await sharp(req.file.path)
+						.webp({ quality: 90 })
+						.toFile(resizedImagePath + ".tmp")
+					// Create thumbnail version
+					const thumbnailFilename = req.file.filename.replace("_original.webp", "_thumbnail.webp")
+					thumbnailPath = path.join(path.dirname(resizedImagePath), thumbnailFilename)
+					await sharp(req.file.path)
+						.resize(382, 192, {
+							fit: "cover",
+							position: "center"
+						})
+						.webp({ quality: 70 })
+						.toFile(thumbnailPath)
+					// Create quality 50 but resize same size as original
+					const originalThumbnailFilename = req.file.filename.replace("_original.webp", "_small.webp")
+					originalThumbnailPath = path.join(path.dirname(resizedImagePath), originalThumbnailFilename)
+					await sharp(req.file.path).webp({ quality: 50 }).toFile(originalThumbnailPath)
+				} else {
+					// For other images, just convert to WebP without resizing
+					await sharp(req.file.path)
+						.webp({ quality: 90 })
+						.toFile(resizedImagePath + ".tmp")
+
+					log.info(`Image converted to WebP format: ${req.file.filename}`)
+				}
+
+				// Replace the original file with the processed one
+				fs.renameSync(resizedImagePath + ".tmp", resizedImagePath)
+
+				const baseUrl = `${req.protocol}://${req.get("host")}`
+				const imageUrl = `${baseUrl}/image/${id}/${req.file.filename}`
+				log.info(`image uploaded: ${req.file.filename}, URL: ${imageUrl}`)
+
+				// Prepare response data
+				const responseData: any = {
+					id: 0, // Will be set after saving to DB
+					filename: req.file.filename,
+					originalname: req.file.originalname,
+					size: req.file.size,
+					url: imageUrl,
+					mimetype: "image/webp", // Always WebP now
+					uploader: account._id
+				}
+
+				// Add thumbnail info for blog images
+				if (id === "blog" && thumbnailPath) {
+					const thumbnailFilename = path.basename(thumbnailPath)
+					const thumbnailUrl = `${baseUrl}/image/${id}/${thumbnailFilename}`
+					responseData.thumbnail = {
+						filename: thumbnailFilename,
+						url: thumbnailUrl,
+						size: "800x450"
+					}
+				}
+
+				var saveToDB = await General.addUploadData({
+					id: 0, // Auto incremented by database
+					owner: parseInt(account._id),
+					time: getTimeV2(true),
+					url: imageUrl,
+					filename: req.file.filename,
+					size: req.file.size,
+					type: 1 // Always image type for this endpoint
+				})
+				if (!saveToDB.data) {
+					log.error("Failed to save upload data to database")
+					// Clean up the uploaded files if saving to DB fails
+					fs.unlinkSync(resizedImagePath)
+					if (thumbnailPath && fs.existsSync(thumbnailPath)) {
+						fs.unlinkSync(thumbnailPath)
+					}
+					return res.json({
+						status: "Failed to save upload data",
+						retcode: statusCodes.error.FAIL
+					})
+				}
+
+				responseData.id = saveToDB.data.id
+
+				return res.json({
+					status: "Image uploaded successfully",
+					retcode: statusCodes.success.RETCODE,
+					data: responseData
+				})
+			} catch (resizeError) {
+				log.error("Image processing error:", resizeError)
+				return res.json({
+					status: "Image processing failed",
+					retcode: statusCodes.error.FAIL
+				})
+			}
+		})
+	} catch (error) {
+		log.error("Image upload error:", error)
+		return res.json({
+			status: error instanceof Error ? error.message : "Upload failed",
+			retcode: statusCodes.error.FAIL
+		})
+	}
 })
 
 r.get("/game/resource/version", async (req: Request, res: Response) => {
@@ -93,29 +331,15 @@ r.get("/blog/detail/:id", async (req: Request, res: Response) => {
 	const result = await General.detailsBlog(parseInt(id), fullDetails)
 	return res.json(result)
 })
-r.post("/blog/create", async (req: Request, res: Response) => {
+r.post("/blog/create", checkAuth, async (req: Request, res: Response) => {
 	const { title, slug, content, shortContent, thumbnail, comment, index, tags, language } = req.body
-	var auth = req.headers.authorization
-	if (isEmpty(auth)) {
-		return res.json({
-			status: "No session?",
-			retcode: statusCodes.error.FAIL
-		})
-	}
 	if (isEmpty(title) || isEmpty(content) || isEmpty(shortContent) || isEmpty(slug)) {
 		return res.json({
 			status: "Title, content, shortContent, and slug are required",
 			retcode: statusCodes.error.FAIL
 		})
 	}
-	var rAccount = await Yuuki.GET_ACCOUNT_BY_TOKEN_WEB(auth as string)
-	if (!rAccount.data) {
-		return res.json({
-			status: rAccount.message || "Invalid session",
-			retcode: rAccount.retcode || statusCodes.error.LOGIN_FORBIDDED
-		})
-	}
-	var account = rAccount.data as AccountDB
+	const account = (req as any).account as AccountDB
 	log.info(`Creating blog post by ${account._id} (${account.role})`)
 	if (!account.role.includes(Role.EDITOR) && !account.role.includes(Role.ADMIN)) {
 		return res.json({
@@ -151,38 +375,16 @@ r.post("/blog/create", async (req: Request, res: Response) => {
 		//data: isAdd ? blog : null
 	})
 })
-r.post("/blog/edit/:id", async (req: Request, res: Response) => {
+r.post("/blog/edit/:id", checkAuth, async (req: Request, res: Response) => {
 	const { title, slug, content, shortContent, thumbnail, comment, index, tags, language } = req.body
 	const { id } = req.params
-	var auth = req.headers.authorization
 	if (!id || isNaN(parseInt(id))) {
 		return res.json({
 			status: "Invalid ID",
 			retcode: statusCodes.error.FAIL
 		})
 	}
-	if (isEmpty(auth)) {
-		return res.json({
-			status: "No session?",
-			retcode: statusCodes.error.FAIL
-		})
-	}
-	/*
-	if (isEmpty(title) || isEmpty(content) || isEmpty(shortContent) || isEmpty(slug)) {
-		return res.json({
-			status: "Title, content, shortContent, and slug are required",
-			retcode: statusCodes.error.FAIL
-		})
-	}
-	*/
-	var rAccount = await Yuuki.GET_ACCOUNT_BY_TOKEN_WEB(auth as string)
-	if (!rAccount.data) {
-		return res.json({
-			status: rAccount.message || "Invalid session",
-			retcode: rAccount.retcode || statusCodes.error.LOGIN_FORBIDDED
-		})
-	}
-	var account = rAccount.data as AccountDB
+	const account = (req as any).account as AccountDB
 	log.info(`Editing blog post by ${account._id} (${account.role})`)
 	if (!account.role.includes(Role.EDITOR) && !account.role.includes(Role.ADMIN)) {
 		return res.json({
@@ -211,7 +413,7 @@ r.post("/blog/edit/:id", async (req: Request, res: Response) => {
 		data: result.data
 	})
 })
-r.delete("/article/remove/:id", async (req: Request, res: Response) => {
+r.delete("/article/remove/:id", checkAuth, async (req: Request, res: Response) => {
 	const { id } = req.params
 	if (!id || isNaN(parseInt(id))) {
 		return res.json({
@@ -219,15 +421,7 @@ r.delete("/article/remove/:id", async (req: Request, res: Response) => {
 			retcode: statusCodes.error.FAIL
 		})
 	}
-	var auth = req.headers.authorization
-	const rAccount = await Yuuki.GET_ACCOUNT_BY_TOKEN_WEB(auth as string)
-	if (!rAccount.data) {
-		return res.json({
-			status: rAccount.message || "Invalid session",
-			retcode: rAccount.retcode || statusCodes.error.LOGIN_FORBIDDED
-		})
-	}
-	const account = rAccount.data as AccountDB
+	const account = (req as any).account as AccountDB
 	log.info(`Removing article with ID ${id} by ${account._id} (${account.role})`)
 	if (!account.role.includes(Role.EDITOR) && !account.role.includes(Role.ADMIN)) {
 		return res.json({
@@ -508,6 +702,52 @@ r.all("/srtool/:id", async (req: Request, res: Response) => {
 	}
 
 	return res.send(`Sync data for ${uid} in server ${server_id} is OK`)
+})
+
+// GitHub API proxy with caching
+r.get("/app/yuukips-launcher/latest", async (req: Request, res: Response) => {
+	try {
+		const cacheKey = "yuukips-launcher-latest"
+		const now = Date.now()
+		const cached = githubCache.get(cacheKey)
+
+		// Check if we have valid cached data
+		if (cached && now - cached.timestamp < CACHE_DURATION) {
+			log.info("Serving cached GitHub API response for YuukiPS launcher")
+			return res.json(cached.data)
+		}
+
+		// Fetch fresh data from GitHub API
+		log.info("Fetching fresh data from GitHub API for YuukiPS launcher")
+		const response = await fetch("https://api.github.com/repos/YuukiPS/yuukips-launcher/releases/latest")
+
+		if (!response.ok) {
+			log.error(`GitHub API error: ${response.status} ${response.statusText}`)
+			return res.status(response.status).json({
+				status: "GitHub API error",
+				retcode: statusCodes.error.FAIL,
+				message: `${response.status} ${response.statusText}`
+			})
+		}
+
+		const data = await response.json()
+
+		// Cache the response
+		githubCache.set(cacheKey, {
+			data: data,
+			timestamp: now
+		})
+
+		log.info("GitHub API response cached for 1 minute")
+		return res.json(data)
+	} catch (error) {
+		log.error("GitHub API proxy error:", error)
+		return res.status(500).json({
+			status: "Proxy error",
+			retcode: statusCodes.error.FAIL,
+			message: error instanceof Error ? error.message : "Unknown error"
+		})
+	}
 })
 
 export default r

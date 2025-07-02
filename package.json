@@ -30,6 +30,7 @@
 	},
 	"homepage": "https://github.com/YuukiPS/handbook-api#readme",
 	"dependencies": {
+		"@types/multer": "^1.4.13",
 		"acfg": "^1.2.4",
 		"axios": "^1.7.2",
 		"body-parser": "^1.20.2",
@@ -38,23 +39,26 @@
 		"cookie-parser": "^1.4.6",
 		"cors": "^2.8.5",
 		"discord.js": "^14.19.3",
-		"express": "^4.21.0",
+		"express": "^4.21.2",
 		"ioredis": "^5.4.1",
 		"minimist": "^1.2.8",
 		"module-alias": "^2.2.3",
 		"mongodb": "^6.15.0",
+		"multer": "^2.0.1",
 		"openai": "^4.96.2",
 		"rate-limiter-flexible": "^7.1.0",
 		"set-interval-async": "^3.0.3",
+		"sharp": "^0.34.2",
 		"socket.io": "^4.8.1"
 	},
 	"devDependencies": {
 		"@types/body-parser": "^1.19.5",
 		"@types/cookie-parser": "^1.4.7",
 		"@types/cors": "^2.8.17",
-		"@types/express": "^4.17.21",
+		"@types/express": "^4.17.23",
 		"@types/module-alias": "^2.0.4",
 		"@types/node": "^20.13.0",
+		"@types/sharp": "^0.31.1",
 		"ts-node-dev": "^2.0.0",
 		"typescript": "^5.4.5"
 	}

@@ -105,13 +105,13 @@ export interface AccountDB extends Document {
 	role: Role[]
 }
 export enum Role {
-  BLANK = 0,
-  ADMIN = 1,
-  MOD = 2,
-  MEMBER = 3,
-  SPONSOR = 4,
-  BAN = 5,
-  EDITOR = 6,
+	BLANK = 0,
+	ADMIN = 1,
+	MOD = 2,
+	MEMBER = 3,
+	SPONSOR = 4,
+	BAN = 5,
+	EDITOR = 6
 }
 export interface PlayerBasic {
 	uid: number // player uid
@@ -925,4 +925,20 @@ export interface BlogData extends ArticleData {
 	thumbnail?: string // thumbnail image for blog
 	comment: boolean // if true allow comment on blog
 	index: boolean // if true index this blog in search engine
+}
+export enum UploadType {
+	Image = 1, // image upload
+	Video = 2, // video upload
+	Audio = 3, // audio upload
+	Document = 4, // document upload
+	Other = 5 // other upload
+}
+export interface UploadData {
+	id: number // id upload (must be unique)
+	owner: number // id account (Yuuki account)
+	time: number // upload create use timestemp
+	url: string // url of the upload file
+	filename: string // filename of the upload file
+	size: number // size of the upload file in bytes
+	type: UploadType // 1=image, 2=video, 3=audio, 4=document, 5=other
 }

@@ -9,7 +9,7 @@ import {
 	isValidUrl,
 	readJsonFileCached
 } from "@UT/library"
-import { BookRsp, ArticleData, GitLabCommit, ItemData, Prop, PropRsp, TypeArticle } from "@UT/response"
+import { BookRsp, ArticleData, GitLabCommit, ItemData, Prop, PropRsp, TypeArticle, UploadData } from "@UT/response"
 import axios from "axios"
 import fs from "fs/promises"
 import DBMongo from "@DB/client/mongo"
@@ -499,7 +499,7 @@ export const _ = {
 
 			// Only include fields that are not empty/undefined
 			const dataToUpdate: any = {}
-			
+
 			Object.entries(providedData).forEach(([key, value]: [string, any]) => {
 				if (value !== undefined && value !== null) {
 					// Handle different value types appropriately
@@ -508,15 +508,15 @@ export const _ = {
 						if (value.length > 0) {
 							dataToUpdate[key] = value
 						}
-					} else if (typeof value === 'string') {
+					} else if (typeof value === "string") {
 						// For strings, only include if not empty
-						if (value.trim() !== '') {
+						if (value.trim() !== "") {
 							dataToUpdate[key] = value
 						}
-					} else if (typeof value === 'number') {
+					} else if (typeof value === "number") {
 						// For numbers, include all valid numbers (including 0)
 						dataToUpdate[key] = value
-					} else if (typeof value === 'boolean') {
+					} else if (typeof value === "boolean") {
 						// For booleans, include all values
 						dataToUpdate[key] = value
 					} else {
@@ -584,6 +584,51 @@ export const _ = {
 				message: "api_db_article_edit_error",
 				retcode: -1,
 				data: null
+			}
+		}
+	},
+	addUploadData: async function (data: UploadData) {
+		await DBMongo.isConnected()
+		const collection = DBMongo.getCollection<UploadData>("upload")
+		if (!collection) {
+			log.errorNoStack("api_db_nofound_collection_upload")
+			return {
+				message: "api_db_nofound_collection_upload",
+				retcode: -1,
+				data: null
+			}
+		}
+
+		if (data.id == 0) {
+			data.id = await Yuuki.getCount("upload")
+		}
+
+		const existing = await collection.findOne({ filename: data.filename })
+		if (!existing) {
+			await collection.insertOne(data as OptionalUnlessRequiredId<UploadData>)
+			return {
+				message: "api_db_upload_add_success",
+				retcode: 0,
+				data: { id: data.id }
+			}
+		} else {
+			// update existing upload data
+			const result = await collection.updateOne(
+				{ filename: data.filename },
+				{ $set: { ...data, update: getTimeV2() } }
+			)
+			if (result.modifiedCount > 0) {
+				return {
+					message: "api_db_upload_update_success",
+					retcode: 0,
+					data: { id: existing.id }
+				}
+			} else {
+				return {
+					message: "api_db_upload_update_no_changes",
+					retcode: -1,
+					data: { id: existing.id }
+				}
 			}
 		}
 	},
