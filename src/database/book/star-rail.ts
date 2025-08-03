@@ -830,6 +830,11 @@ class SR {
 				}
 
 				// add name
+				//console.log("Gadget name:", data)
+				if(data.PropName == undefined){
+					log.warn(`Gadget name not found for ID ${id}`)
+					return;
+				}
 				obj.name = General.addMultiLangNamesAsObject(
 					data.PropName.Hash.toString(),
 					LANG_SR,

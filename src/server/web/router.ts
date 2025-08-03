@@ -17,15 +17,6 @@ const r = express.Router()
 
 const log = new Logger("Web")
 
-// Cache for GitHub API proxy
-interface CacheEntry {
-	data: any
-	timestamp: number
-}
-
-const githubCache = new Map<string, CacheEntry>()
-const CACHE_DURATION = 60 * 1000 // 1 minute in milliseconds
-
 // Extend Request interface to include file property from multer
 interface MulterRequest extends Request {
 	file?: Express.Multer.File
@@ -702,52 +693,6 @@ r.all("/srtool/:id", async (req: Request, res: Response) => {
 	}
 
 	return res.send(`Sync data for ${uid} in server ${server_id} is OK`)
-})
-
-// GitHub API proxy with caching
-r.get("/app/yuukips-launcher/latest", async (req: Request, res: Response) => {
-	try {
-		const cacheKey = "yuukips-launcher-latest"
-		const now = Date.now()
-		const cached = githubCache.get(cacheKey)
-
-		// Check if we have valid cached data
-		if (cached && now - cached.timestamp < CACHE_DURATION) {
-			log.info("Serving cached GitHub API response for YuukiPS launcher")
-			return res.json(cached.data)
-		}
-
-		// Fetch fresh data from GitHub API
-		log.info("Fetching fresh data from GitHub API for YuukiPS launcher")
-		const response = await fetch("https://api.github.com/repos/YuukiPS/yuukips-launcher/releases/latest")
-
-		if (!response.ok) {
-			log.error(`GitHub API error: ${response.status} ${response.statusText}`)
-			return res.status(response.status).json({
-				status: "GitHub API error",
-				retcode: statusCodes.error.FAIL,
-				message: `${response.status} ${response.statusText}`
-			})
-		}
-
-		const data = await response.json()
-
-		// Cache the response
-		githubCache.set(cacheKey, {
-			data: data,
-			timestamp: now
-		})
-
-		log.info("GitHub API response cached for 1 minute")
-		return res.json(data)
-	} catch (error) {
-		log.error("GitHub API proxy error:", error)
-		return res.status(500).json({
-			status: "Proxy error",
-			retcode: statusCodes.error.FAIL,
-			message: error instanceof Error ? error.message : "Unknown error"
-		})
-	}
 })
 
 export default r
