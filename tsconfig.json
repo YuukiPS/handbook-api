@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "commonjs",
+    "module": "commonjs", 
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
     "strict": true,
@@ -9,13 +9,12 @@
     "esModuleInterop": true,
     "rootDir": "./src",
     "outDir": "./dist",
-    "baseUrl": ".",
     "paths": {
-      "@UT/*": ["src/util/*"],
-      "@SV/*": ["src/server/*"],
-      "@CMD/*": ["src/commands/*"],
-      "@DB/*": ["src/database/*"],
-      "@JO/*": ["src/job/*"],
+      "@UT/*": ["./src/util/*"],
+      "@SV/*": ["./src/server/*"],
+      "@CMD/*": ["./src/commands/*"],
+      "@DB/*": ["./src/database/*"],
+      "@JO/*": ["./src/job/*"],
     }
   },
   "include": ["src/**/*"]

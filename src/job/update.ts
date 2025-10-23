@@ -27,7 +27,7 @@ class Update {
 	}
 
 	public Start() {
-		var rebuild = GetProfile().autoTesting // in dev mode away rebuild
+		let rebuild = GetProfile().autoTesting // in dev mode away rebuild
 		this.Sync(true, rebuild, !rebuild) // skip for first time (load file excel)
 		if (!rebuild && !this.timeUpdate) {
 			this.timeUpdate = setIntervalAsync(async () => {

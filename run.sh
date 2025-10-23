@@ -5,7 +5,7 @@ metode=$1
 case "$metode" in
   cloud)
     echo "Run Cloud..."
-    npm install && npm update
+    #npm install && npm update
     npm run start -- --env prod
     ;;
 

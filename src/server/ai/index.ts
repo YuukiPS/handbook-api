@@ -244,8 +244,8 @@ class AI {
 		const server = GetAiServer()
 		if (!server) throw new Error("No AI config found")
 		this.cfg = {
-			urlAsk: `${server.url}/ollama/v1/`,
-			urlEmbed: `${server.url}/ollama/api/embed`,
+			urlAsk: `${server.url}/v1`,
+			urlEmbed: `${server.url}/v1`,
 			modelAsk: server.model.ask.id,
 			modelEmbed: server.model.embed.id,
 			key: server.key,
@@ -259,7 +259,7 @@ class AI {
 		}
 		this.client = new OpenAI({ apiKey: this.cfg.key, baseURL: this.cfg.urlAsk })
 		this.initialized = true
-		log.info(`AI initialized with model ${this.cfg.modelAsk}`)
+		log.info(`AI initialized with model ${this.cfg.modelAsk} with ask server ${this.cfg.urlAsk}`)
 	}
 
 	private getConv(uid: string, reset = false) {

@@ -19,8 +19,15 @@ import { LANG_SR } from "../book/star-rail"
 import { LANG_GI } from "../book/genshin-impact"
 import Discord from "@SV/discord"
 import Yuuki from "@DB/general/yuuki"
+import DBRedis from "@DB/client/redis"
+import crypto from "crypto"
 
 const log = new Logger("General")
+
+// Helper function to create MD5 hash for cache keys
+function createMD5Hash(input: string): string {
+	return crypto.createHash("md5").update(input).digest("hex")
+}
 
 export const _ = {
 	getItem: async function (
@@ -30,6 +37,21 @@ export const _ = {
 		lang: string = "EN",
 		filter: Partial<ItemData> = {}
 	): Promise<any> {
+		// Create cache key based on parameters with MD5 hash for filter
+		const filterHash = Object.keys(filter).length > 0 ? createMD5Hash(JSON.stringify(filter)) : ""
+		const cacheKey = `getItem:${id}:${type}:${game || ""}:${lang.toUpperCase()}:${filterHash}`
+		
+		// Try to get data from cache first
+		try {
+			const cachedData = await DBRedis.get(cacheKey)
+			if (cachedData) {
+				log.debug(`getItem cache hit for key: ${cacheKey}`)
+				return cachedData
+			}
+		} catch (cacheError) {
+			log.warn("Redis cache error for getItem, falling back to database:", cacheError)
+		}
+
 		await DBMongo.isConnected()
 		const collection = DBMongo.getCollection<ItemData>("book")
 		if (!collection) {
@@ -127,18 +149,38 @@ export const _ = {
 
 		// 4) return a uniform “not found” or the item
 		if (!item) {
-			return {
+			const response = {
 				message: "api_db_book_notfound",
 				retcode: -1,
 				data: null
 			}
+			
+			// Cache the result for 1 day (1440 minutes)
+			try {
+				await DBRedis.set(cacheKey, response, 1440)
+				log.debug(`getItem cached for key: ${cacheKey}`)
+			} catch (cacheError) {
+				log.warn("Failed to cache getItem result:", cacheError)
+			}
+			
+			return response
 		}
 
-		return {
+		const response = {
 			message: "api_db_book_get_success",
 			retcode: 0,
 			data: item
 		}
+		
+		// Cache the result for 1 day (1440 minutes)
+		try {
+			await DBRedis.set(cacheKey, response, 1440)
+			log.debug(`getItem cached for key: ${cacheKey}`)
+		} catch (cacheError) {
+			log.warn("Failed to cache getItem result:", cacheError)
+		}
+		
+		return response
 	},
 	findItem: async function (options?: {
 		search?: string
@@ -150,13 +192,27 @@ export const _ = {
 		split?: boolean
 	}): Promise<BookRsp> {
 		try {
+			// Create cache key based on parameters with MD5 hash for search
+			const { search, type, game, lang = "EN", limit = 10, page = 1, split = false } = options || {}
+			const searchHash = search ? createMD5Hash(search) : ""
+			const cacheKey = `findItem:${searchHash}:${type || ""}:${game || ""}:${lang}:${limit}:${page}:${split}`
+			
+			// Try to get data from cache first
+			try {
+				const cachedData = await DBRedis.get(cacheKey)
+				if (cachedData) {
+					log.debug(`findItem cache hit for key: ${cacheKey}`)
+					return cachedData
+				}
+			} catch (cacheError) {
+				log.warn("Redis cache error for findItem, falling back to database:", cacheError)
+			}
+
 			const cItem = DBMongo.getCollection<ItemData>("book")
 			if (!cItem) {
 				log.errorNoStack("api_db_nofound_collection")
 				return { message: "api_db_nofound_collection", retcode: statusCodes.error.CANCEL, data: null }
 			}
-
-			const { search, type, game, lang = "EN", limit = 10, page = 1, split = false } = options || {}
 
 			var setlang = lang.toUpperCase()
 
@@ -282,19 +338,30 @@ export const _ = {
 
 			const processedResult = await cItem.aggregate(pipeline).toArray()
 
+			let response: BookRsp
 			if (processedResult.length > 0) {
-				return {
+				response = {
 					message: "api_db_book_get_success",
 					retcode: 0,
 					data: processedResult
 				}
 			} else {
-				return {
+				response = {
 					message: "api_db_book_notfound",
 					retcode: -1,
 					data: null
 				}
 			}
+
+			// Cache the result for 1 day (1440 minutes)
+			try {
+				await DBRedis.set(cacheKey, response, 1440)
+				log.debug(`findItem cached for key: ${cacheKey}`)
+			} catch (cacheError) {
+				log.warn("Failed to cache findItem result:", cacheError)
+			}
+
+			return response
 		} catch (error) {
 			log.error(error)
 			return {
@@ -707,6 +774,20 @@ export const _ = {
 		total?: number
 	}> {
 		try {
+			// Create cache key based on parameters
+			const cacheKey = `listAsk:${limit}:${page}:${includeOwnerData}`
+			
+			// Try to get data from cache first
+			try {
+				const cachedData = await DBRedis.get(cacheKey)
+				if (cachedData) {
+					log.debug(`listAsk cache hit for key: ${cacheKey}`)
+					return cachedData
+				}
+			} catch (cacheError) {
+				log.warn("Redis cache error for listAsk, falling back to database:", cacheError)
+			}
+
 			await DBMongo.isConnected()
 			const collection = DBMongo.getCollection<ArticleData>("article")
 			if (!collection) {
@@ -982,12 +1063,22 @@ export const _ = {
 
 			const questions = await collection.aggregate(pipeline).toArray()
 
-			return {
+			const result = {
 				message: "api_db_article_list_success",
 				retcode: 0,
 				data: questions,
 				total
 			}
+
+			// Cache the result for 1 day (1440 minutes)
+			try {
+				await DBRedis.set(cacheKey, result, 1440)
+				log.debug(`listAsk cached for key: ${cacheKey}`)
+			} catch (cacheError) {
+				log.warn("Failed to cache listAsk result:", cacheError)
+			}
+
+			return result
 		} catch (error) {
 			log.error("listAsk error:", error)
 			return {
@@ -1021,6 +1112,22 @@ export const _ = {
 		total?: number
 	}> {
 		try {
+			// Create cache key based on parameters with MD5 hashes for search and tags
+			const searchHash = search ? createMD5Hash(search) : ""
+			const tagsHash = tags && tags.length > 0 ? createMD5Hash(tags.join(",")) : ""
+			const cacheKey = `listBlog:${limit}:${page}:${searchHash}:${tagsHash}:${includeOwnerData}:${includeContent}`
+			
+			// Try to get data from cache first
+			try {
+				const cachedData = await DBRedis.get(cacheKey)
+				if (cachedData) {
+					log.info(`listBlog cache hit for key: ${cacheKey}`)
+					return cachedData
+				}
+			} catch (cacheError) {
+				log.warn("Redis cache error for listBlog, falling back to database:", cacheError)
+			}
+
 			await DBMongo.isConnected()
 			const collection = DBMongo.getCollection<ArticleData>("article")
 			if (!collection) {
@@ -1137,12 +1244,22 @@ export const _ = {
 
 			const blogs = await collection.aggregate(pipeline).toArray()
 
-			return {
+			const result = {
 				message: "api_db_article_list_success",
 				retcode: 0,
 				data: blogs,
 				total
 			}
+
+			// Cache the result for 1 day (1440 minutes)
+			try {
+				await DBRedis.set(cacheKey, result, 1440)
+				log.info(`listBlog cached for key: ${cacheKey}`)
+			} catch (cacheError) {
+				log.warn("Failed to cache listBlog result:", cacheError)
+			}
+
+			return result
 		} catch (error) {
 			log.error("listBlog error:", error)
 			return {
@@ -1167,6 +1284,21 @@ export const _ = {
 		data: any | null
 	}> {
 		try {
+			// Create cache key based on parameters with MD5 hash for string identifiers
+			const identifierHash = typeof identifier === "string" ? createMD5Hash(identifier) : identifier.toString()
+			const cacheKey = `detailsBlog:${identifierHash}:${includeContent}`
+			
+			// Try to get data from cache first
+			try {
+				const cachedData = await DBRedis.get(cacheKey)
+				if (cachedData) {
+					log.info(`detailsBlog cache hit for key: ${cacheKey}`)
+					return cachedData
+				}
+			} catch (cacheError) {
+				log.warn("Redis cache error for detailsBlog, falling back to database:", cacheError)
+			}
+
 			await DBMongo.isConnected()
 			const collection = DBMongo.getCollection<ArticleData>("article")
 			if (!collection) {
@@ -1262,19 +1394,35 @@ export const _ = {
 			const result = await collection.aggregate(pipeline).toArray()
 			const blog = result[0] || null
 
+			let response: {
+				message: string
+				retcode: number
+				data: any | null
+			}
+
 			if (blog) {
-				return {
+				response = {
 					message: "api_db_article_detail_success",
 					retcode: 0,
 					data: blog
 				}
 			} else {
-				return {
+				response = {
 					message: "api_db_article_detail_notfound",
 					retcode: -1,
 					data: null
 				}
 			}
+
+			// Cache the result for 1 day (1440 minutes), even if not found to prevent repeated DB queries
+			try {
+				await DBRedis.set(cacheKey, response, 1440)
+				log.info(`detailsBlog cached for key: ${cacheKey}`)
+			} catch (cacheError) {
+				log.warn("Failed to cache detailsBlog result:", cacheError)
+			}
+
+			return response
 		} catch (error) {
 			log.error("detailsBlog error:", error)
 			return {

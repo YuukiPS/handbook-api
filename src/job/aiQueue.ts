@@ -69,7 +69,7 @@ class aiQueue {
 			log.errorNoStack(`${namaQueue} queue not found`)
 			return 0
 		}
-		var respon = await this.queue.add(namaQueue, task, {
+		let respon = await this.queue.add(namaQueue, task, {
 			//attempts: 2,
 			//backoff: 1000,
 			removeOnComplete: {
